@@ -183,7 +183,8 @@ def handle_message(event):
     ai_response = generate_ai_response(user_message, user_name)
     
     # 記錄互動數據（用於研究分析）
-    save_interaction(user_id, user_name, user_message, ai_response)
+    # save_interaction(user_id, user_name, user_message, ai_response)
+    print(f"✅ Message processed for {user_name}: {user_message[:30]}...")
     
     # 回覆學生
     line_bot_api.reply_message(
