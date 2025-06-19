@@ -1,499 +1,95 @@
-import os
-import sqlite3
-from datetime import datetime, timedelta
-import re
-import json
-from collections import Counter
-import threading
-import time
-from flask import Flask, request, abort, render_template_string, jsonify
+from flask import Flask, request, abort, jsonify
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import random
+import os
+import sqlite3
+import json
+from datetime import datetime, timedelta
+from collections import Counter, defaultdict
+import re
 
 app = Flask(__name__)
 
 # LINE Bot 設定
-line_bot_api = LineBotApi(os.environ['LINE_CHANNEL_ACCESS_TOKEN'])
-handler = WebhookHandler(os.environ['LINE_CHANNEL_SECRET'])
+line_bot_api = LineBotApi(os.environ.get('CHANNEL_ACCESS_TOKEN'))
+handler = WebhookHandler(os.environ.get('CHANNEL_SECRET'))
 
-# 18週課程進度與智能提問系統
+# 18週課程設定
 COURSE_SCHEDULE_18_WEEKS = {
-    1: {
-        "topic": "Course Introduction and AI Era Overview",
-        "chinese": "課程介紹,人工智慧如何改變我們的生活?",
-        "keywords": ["artificial intelligence", "ai overview", "transformation", "introduction"],
-        "focus": "基礎認知"
-    },
-    2: {
-        "topic": "Generative AI Technologies and Applications",
-        "chinese": "生成式AI技術與應用：大型語言模型實務操作",
-        "keywords": ["generative ai", "chatgpt", "claude", "large language models", "llm"],
-        "focus": "實務操作"
-    },
-    3: {
-        "topic": "Student Project Sharing - Generative AI Cases",
-        "chinese": "學生專題分享：生成式AI實際應用案例報告",
-        "keywords": ["project sharing", "case study", "generative ai applications"],
-        "focus": "專題分享"
-    },
-    4: {
-        "topic": "AI Applications in Learning",
-        "chinese": "AI在學習領域的應用：學習輔助工具、知識管理系統",
-        "keywords": ["learning tools", "knowledge management", "education ai", "study assistant"],
-        "focus": "學習應用"
-    },
-    5: {
-        "topic": "Student Project Sharing - AI Learning Tools",
-        "chinese": "學生專題分享：AI學習工具使用經驗與成效報告",
-        "keywords": ["learning tools experience", "effectiveness report", "ai study"],
-        "focus": "專題分享"
-    },
-    6: {
-        "topic": "AI in Creative and Professional Fields",
-        "chinese": "AI在創意與職場的應用：內容創作、工作流程優化",
-        "keywords": ["content creation", "workflow optimization", "creative ai", "professional"],
-        "focus": "職場應用"
-    },
-    7: {
-        "topic": "Student Project Sharing - Creative AI Applications",
-        "chinese": "學生專題分享：AI在創意與職場的創新應用展示",
-        "keywords": ["creative applications", "innovation showcase", "professional ai"],
-        "focus": "專題分享"
-    },
-    8: {
-        "topic": "AI Tool Development and Customization",
-        "chinese": "AI工具開發與客製化：無程式碼平台應用",
-        "keywords": ["no-code platform", "tool development", "customization", "personalized ai"],
-        "focus": "工具開發"
-    },
-    9: {
-        "topic": "Student Project Sharing - Custom AI Tools",
-        "chinese": "學生專題分享：自製AI工具開發過程與成果展示",
-        "keywords": ["custom tools", "development process", "tool showcase"],
-        "focus": "專題分享"
-    },
-    10: {
-        "topic": "Fundamentals of AI (I) - Core Concepts",
-        "chinese": "AI基礎概念(一)：核心概念、運作原理與技術架構",
-        "keywords": ["core concepts", "operational principles", "technical architecture", "fundamentals"],
-        "focus": "理論基礎"
-    },
-    11: {
-        "topic": "Fundamentals of AI (II) - Trends and Prospects",
-        "chinese": "AI基礎概念(二)：發展趨勢與應用展望",
-        "keywords": ["development trends", "application prospects", "future ai"],
-        "focus": "理論基礎"
-    },
-    12: {
-        "topic": "Student Project Sharing - AI Fundamental Analysis",
-        "chinese": "學生專題分享：AI基礎概念關鍵議題研析",
-        "keywords": ["fundamental analysis", "key issues", "concept discussion"],
-        "focus": "專題分享"
-    },
-    13: {
-        "topic": "Industry 4.0 and Smart Manufacturing",
-        "chinese": "工業4.0與智慧製造：AI在工業領域的革新應用",
-        "keywords": ["industry 4.0", "smart manufacturing", "industrial ai", "manufacturing"],
-        "focus": "工業應用"
-    },
-    14: {
-        "topic": "Student Project Sharing - AI Manufacturing Cases",
-        "chinese": "學生專題分享：AI輔助製造案例分析報告",
-        "keywords": ["manufacturing cases", "industrial analysis", "ai manufacturing"],
-        "focus": "專題分享"
-    },
-    15: {
-        "topic": "AI in Home and Daily Life",
-        "chinese": "AI在家庭與日常生活的應用：智慧家居、健康管理",
-        "keywords": ["smart home", "health management", "daily life", "home automation"],
-        "focus": "生活應用"
-    },
-    16: {
-        "topic": "Student Project Sharing - Daily Life AI Innovations",
-        "chinese": "學生專題分享：生活中的AI創新應用提案",
-        "keywords": ["daily life innovation", "application proposals", "life quality"],
-        "focus": "專題分享"
-    },
-    17: {
-        "topic": "Final Exam",
-        "chinese": "期末考試",
-        "keywords": ["final exam", "assessment", "evaluation"],
-        "focus": "評量"
-    },
-    18: {
-        "topic": "Flexible Teaching Week",
-        "chinese": "彈性教學週：自主學習指定教材",
-        "keywords": ["flexible learning", "self-directed", "review"],
-        "focus": "自主學習"
-    }
+    1: {"topic": "Course Introduction and AI Era Overview", "chinese": "課程介紹,人工智慧如何改變我們的生活?"},
+    2: {"topic": "Generative AI Technologies", "chinese": "生成式AI技術 (ChatGPT, Claude等)"},
+    3: {"topic": "Student Presentations 1", "chinese": "學生專題分享週(1)"},
+    4: {"topic": "AI Applications in Learning", "chinese": "AI在學習上的應用"},
+    5: {"topic": "Student Presentations 2", "chinese": "學生專題分享週(2)"},
+    6: {"topic": "AI in Creative and Professional Fields", "chinese": "AI在創意與職場的應用"},
+    7: {"topic": "Student Presentations 3", "chinese": "學生專題分享週(3)"},
+    8: {"topic": "AI Tool Development and Customization", "chinese": "AI工具開發與客製化"},
+    9: {"topic": "Student Presentations 4", "chinese": "學生專題分享週(4)"},
+    10: {"topic": "AI Ethics and Responsible Use", "chinese": "AI倫理與責任使用"},
+    11: {"topic": "AI in Research and Academic Writing", "chinese": "AI在研究與學術寫作的應用"},
+    12: {"topic": "Student Presentations 5", "chinese": "學生專題分享週(5)"},
+    13: {"topic": "Industry 4.0 and Smart Manufacturing", "chinese": "工業4.0與智慧製造"},
+    14: {"topic": "Student Presentations 6", "chinese": "學生專題分享週(6)"},
+    15: {"topic": "AI in Home and Daily Life", "chinese": "AI在居家與日常生活的應用"},
+    16: {"topic": "Student Presentations 7", "chinese": "學生專題分享週(7)"},
+    17: {"topic": "Future Trends and Career Preparation", "chinese": "未來趨勢與職涯準備"},
+    18: {"topic": "Final Review and Course Reflection", "chinese": "期末回顧與課程反思"}
 }
 
-# 針對不同週次的智能提問題庫
-WEEKLY_INTELLIGENT_QUESTIONS = {
-    1: [
-        "How do you think AI has already changed your daily routine without you realizing it?",
-        "What aspects of AI transformation do you find most exciting or concerning?",
-        "Can you identify three AI applications you use regularly in your life?"
-    ],
-    2: [
-        "What's your experience with ChatGPT or Claude so far? Which tasks do you find them most helpful for?",
-        "How do you think generative AI might change the way we create content and communicate?",
-        "What are the main differences you've noticed between different large language models?"
-    ],
-    4: [
-        "Which AI learning tools have you tried, and how effective were they for your studies?",
-        "How might AI-powered knowledge management systems change the way we organize information?",
-        "What challenges do you face when using AI for learning, and how do you overcome them?"
-    ],
-    6: [
-        "How could AI tools enhance creativity rather than replace human creativity?",
-        "What workflow optimizations have you implemented using AI in your work or studies?",
-        "What ethical considerations should we keep in mind when using AI for content creation?"
-    ],
-    8: [
-        "What kind of personalized AI tool would be most useful for your specific needs?",
-        "How do no-code platforms democratize AI development for non-technical users?",
-        "What are the limitations of no-code AI development compared to traditional programming?"
-    ],
-    10: [
-        "How do you explain the core concepts of AI to someone with no technical background?",
-        "What misconceptions about AI do you think are most common among the general public?",
-        "How do the operational principles of AI relate to human intelligence?"
-    ],
-    13: [
-        "How might Industry 4.0 change the job market and required skills in manufacturing?",
-        "What are the main benefits and challenges of implementing AI in industrial settings?",
-        "How can traditional manufacturers transition to smart manufacturing successfully?"
-    ],
-    15: [
-        "What smart home applications do you think will become mainstream in the next 5 years?",
-        "How can AI improve health management while protecting personal privacy?",
-        "What daily life tasks would you most like to see enhanced by AI?"
-    ]
+# 課程目標關鍵詞
+COURSE_OBJECTIVES = {
+    'AI_基礎認知': ['artificial intelligence', 'ai', 'machine learning', 'algorithm', 'technology', '智慧', '演算法', '科技'],
+    '實務應用': ['application', 'practical', 'tool', 'solution', 'implementation', '應用', '實務', '工具', '解決方案'],
+    '倫理責任': ['ethics', 'responsibility', 'privacy', 'bias', 'society', '倫理', '責任', '隱私', '偏見', '社會']
 }
 
-# 資料庫初始化
-def init_database():
-    """初始化資料庫表格"""
-    conn = sqlite3.connect('emi_research.db')
+def get_current_week():
+    """計算當前課程週次"""
+    semester_start = datetime(2025, 2, 17)  # 假設學期開始日期
+    current_date = datetime.now()
+    days_passed = (current_date - semester_start).days
+    week = min(max(1, (days_passed // 7) + 1), 18)
+    return week
+
+def get_db_connection():
+    """建立資料庫連接"""
+    conn = sqlite3.connect('course_data.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    """初始化資料庫"""
+    conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 用戶表
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT UNIQUE NOT NULL,
+            user_id TEXT PRIMARY KEY,
             user_name TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            first_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
-    # 互動記錄表
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS interactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
+            user_id TEXT,
+            user_name TEXT,
+            content TEXT,
+            ai_response TEXT,
             message_type TEXT,
-            content TEXT NOT NULL,
-            quality_score REAL DEFAULT 0,
-            contains_keywords INTEGER DEFAULT 0,
-            english_ratio REAL DEFAULT 0,
+            quality_score REAL,
+            english_ratio REAL,
+            contains_keywords INTEGER,
             group_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (user_id)
-        )
-    ''')
-    
-    # AI回應記錄表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS ai_responses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            response TEXT NOT NULL,
-            response_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (user_id)
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
     
     conn.commit()
     conn.close()
-
-def get_db_connection():
-    """獲取資料庫連接"""
-    conn = sqlite3.connect('emi_research.db')
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def get_current_course_week():
-    """獲取當前課程週次（基於學期開始日期計算）"""
-    # 假設學期開始日期為2025年2月24日（第1週）
-    semester_start = datetime(2025, 2, 24)
-    current_date = datetime.now()
-    
-    days_passed = (current_date - semester_start).days
-    current_week = min(max(1, days_passed // 7 + 1), 18)
-    
-    return current_week
-
-def classify_message_type(message):
-    """分類訊息類型"""
-    message_lower = message.lower()
-    if any(word in message_lower for word in ['?', 'what', 'how', 'why', 'when', 'where', '什麼', '如何', '為什麼']):
-        return 'question'
-    elif any(word in message_lower for word in ['think', 'believe', 'opinion', '我覺得', '我認為']):
-        return 'discussion'
-    elif any(word in message_lower for word in ['thanks', 'thank you', 'hi', 'hello', '謝謝', '你好']):
-        return 'greeting'
-    else:
-        return 'response'
-
-def calculate_english_ratio(message):
-    """計算英語使用比例"""
-    english_chars = sum(1 for char in message if char.isascii() and char.isalpha())
-    total_chars = sum(1 for char in message if char.isalpha())
-    return english_chars / max(total_chars, 1)
-
-def calculate_course_specific_quality_score(message, current_week):
-    """根據課程特定目標計算品質分數"""
-    score = 1.0
-    message_lower = message.lower()
-    
-    # 基礎分數
-    if len(message) > 50:
-        score += 1.0
-    if len(message) > 100:
-        score += 0.5
-    
-    # AI基礎認知相關加分
-    ai_concepts = ["artificial intelligence", "machine learning", "algorithm", "neural network", 
-                  "deep learning", "automation", "智慧", "演算法", "自動化"]
-    if any(concept in message_lower for concept in ai_concepts):
-        score += 1.0
-    
-    # 實務應用相關加分
-    practical_terms = ["application", "practical", "implementation", "tool", "solution", 
-                      "應用", "實務", "工具", "解決", "實作"]
-    if any(term in message_lower for term in practical_terms):
-        score += 1.0
-    
-    # 倫理責任相關加分
-    ethics_terms = ["ethics", "responsibility", "privacy", "bias", "fairness", 
-                   "倫理", "責任", "隱私", "偏見", "公平"]
-    if any(term in message_lower for term in ethics_terms):
-        score += 1.0
-    
-    # 當週主題相關加分
-    if current_week in COURSE_SCHEDULE_18_WEEKS:
-        week_keywords = COURSE_SCHEDULE_18_WEEKS[current_week]["keywords"]
-        if any(keyword in message_lower for keyword in week_keywords):
-            score += 0.5
-    
-    # 英語使用加分（因為是英語授課）
-    english_ratio = calculate_english_ratio(message)
-    if english_ratio > 0.7:
-        score += 1.0
-    elif english_ratio > 0.5:
-        score += 0.5
-    
-    # 問號加分（鼓勵提問）
-    if '?' in message:
-        score += 0.5
-    
-    return min(score, 5.0)
-
-def contains_course_keywords(message, current_week):
-    """檢查是否包含課程特定關鍵詞"""
-    message_lower = message.lower()
-    
-    # 通用AI課程關鍵詞
-    course_keywords = [
-        'artificial intelligence', 'machine learning', 'ai', 'automation',
-        'generative ai', 'chatgpt', 'claude', 'application', 'practical',
-        'ethics', 'responsibility', 'privacy', 'tool', 'technology',
-        '人工智慧', '機器學習', '應用', '實務', '倫理', '工具'
-    ]
-    
-    # 當週特定關鍵詞
-    if current_week in COURSE_SCHEDULE_18_WEEKS:
-        week_keywords = COURSE_SCHEDULE_18_WEEKS[current_week]["keywords"]
-        course_keywords.extend(week_keywords)
-    
-    return any(keyword in message_lower for keyword in course_keywords)
-
-def log_course_interaction(user_id, user_name, message, is_group, current_week):
-    """記錄課程特定的互動數據"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 確保用戶存在
-        cursor.execute('''
-            INSERT OR IGNORE INTO users (user_id, user_name) 
-            VALUES (?, ?)
-        ''', (user_id, user_name))
-        
-        # 使用課程特定的品質評分
-        quality_score = calculate_course_specific_quality_score(message, current_week)
-        
-        # 記錄互動
-        cursor.execute('''
-            INSERT INTO interactions 
-            (user_id, message_type, content, quality_score, contains_keywords, english_ratio, group_id) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            user_id, 
-            classify_message_type(message),
-            message,
-            quality_score,
-            1 if contains_course_keywords(message, current_week) else 0,
-            calculate_english_ratio(message),
-            'group_1' if is_group else None
-        ))
-        
-        conn.commit()
-        conn.close()
-        print(f"課程互動記錄成功: {user_name} - Week {current_week} - {message[:50]}")
-        
-    except Exception as e:
-        print(f"記錄課程互動失敗: {e}")
-
-def log_ai_response(user_id, response):
-    """記錄AI回應"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO ai_responses (user_id, response, response_time)
-            VALUES (?, ?, ?)
-        ''', (user_id, response, datetime.now().isoformat()))
-        
-        conn.commit()
-        conn.close()
-        print("AI回應記錄成功")
-        
-    except Exception as e:
-        print(f"記錄AI回應失敗: {e}")
-
-def generate_course_contextual_response(user_message, user_name, current_week):
-    """生成課程情境式回應"""
-    if current_week in COURSE_SCHEDULE_18_WEEKS:
-        week_info = COURSE_SCHEDULE_18_WEEKS[current_week]
-        topic = week_info["topic"]
-        chinese_topic = week_info["chinese"]
-        
-        greetings = [
-            f"Hi {user_name}! Welcome to our AI Practical Applications course! This week (Week {current_week}) we're exploring: {topic}. How can I assist you with today's learning?",
-            f"Hello {user_name}! Great to see you engaging with our course material. We're currently in Week {current_week} focusing on {topic}. What questions do you have?",
-            f"Hi {user_name}! 很高興見到您參與我們的AI實務應用課程。本週我們討論{chinese_topic}。有什麼我可以協助您的嗎？"
-        ]
-    else:
-        greetings = [
-            f"Hi {user_name}! Welcome to our AI Practical Applications course! I'm here to help you explore how AI can enhance your life and learning.",
-            f"Hello {user_name}! Ready to dive into the fascinating world of AI applications? Let's discover together!",
-            f"Hi {user_name}! 歡迎來到AI實務應用課程！讓我們一起探索AI如何改變生活與學習。"
-        ]
-    
-    return random.choice(greetings)
-
-def generate_course_specific_response(user_message, user_name, current_week):
-    """生成課程特定的AI回應"""
-    user_message_lower = user_message.lower()
-    
-    # 根據當週主題生成回應
-    if current_week in COURSE_SCHEDULE_18_WEEKS:
-        week_info = COURSE_SCHEDULE_18_WEEKS[current_week]
-        topic = week_info["topic"]
-        
-        # 生成式AI相關（第2週）
-        if current_week == 2 and any(term in user_message_lower for term in ["chatgpt", "claude", "generative", "llm"]):
-            return f"Great question about generative AI, {user_name}! As we're exploring this week, tools like ChatGPT and Claude represent a major breakthrough in how we interact with AI. What specific aspects of these large language models do you find most interesting for practical applications?"
-        
-        # 學習工具相關（第4週）
-        elif current_week == 4 and any(term in user_message_lower for term in ["learning", "study", "education"]):
-            return f"Excellent point, {user_name}! This week we're focusing on AI applications in learning. These tools can personalize education, provide instant feedback, and adapt to individual learning styles. Have you tried any AI-powered learning assistants? What was your experience?"
-        
-        # 職場應用相關（第6週）
-        elif current_week == 6 and any(term in user_message_lower for term in ["work", "professional", "creative", "job"]):
-            return f"That's very relevant to our current topic, {user_name}! AI is transforming creative and professional fields by automating routine tasks and enhancing human capabilities. How do you think AI tools can augment rather than replace human creativity in your field of interest?"
-        
-        # 工業4.0相關（第13週）
-        elif current_week == 13 and any(term in user_message_lower for term in ["industry", "manufacturing", "smart", "4.0"]):
-            return f"Perfect timing for this discussion, {user_name}! Industry 4.0 represents the convergence of AI, IoT, and manufacturing. Smart factories use AI for predictive maintenance, quality control, and supply chain optimization. What aspects of smart manufacturing do you think will have the biggest impact?"
-        
-        # 日常生活應用相關（第15週）
-        elif current_week == 15 and any(term in user_message_lower for term in ["home", "daily", "life", "smart home"]):
-            return f"Great connection to our current focus, {user_name}! AI in daily life is becoming increasingly sophisticated - from voice assistants to smart thermostats that learn your preferences. What daily tasks do you think would benefit most from AI assistance?"
-    
-    # 通用回應
-    general_responses = [
-        f"That's an insightful observation, {user_name}! In the context of AI applications, it's important to consider both the benefits and potential challenges. How do you think we can ensure responsible AI use?",
-        f"Excellent point, {user_name}! This relates well to our course objectives of understanding AI's practical applications. Can you think of specific examples where this might be implemented?",
-        f"Great question, {user_name}! As we explore AI's role in life and learning, critical thinking like yours is essential. What are your thoughts on the ethical implications of this application?"
-    ]
-    
-    return random.choice(general_responses)
-
-def generate_weekly_intelligent_question(user_name, current_week):
-    """根據當前週次生成智能提問"""
-    if current_week in WEEKLY_INTELLIGENT_QUESTIONS:
-        questions = WEEKLY_INTELLIGENT_QUESTIONS[current_week]
-        question = random.choice(questions)
-        week_info = COURSE_SCHEDULE_18_WEEKS.get(current_week, {})
-        topic = week_info.get("topic", f"Week {current_week}")
-        
-        return f"Hi {user_name}! 🤔 This week we're exploring: {topic}. {question} I'd love to hear your perspective and encourage you to share your thoughts with the class!"
-    
-    # 通用智能提問
-    general_questions = [
-        "How has your understanding of AI applications evolved throughout this course?",
-        "What practical AI tool have you found most useful for your daily life or studies?",
-        "What ethical considerations do you think are most important when using AI?",
-        "How do you see AI changing your future career or field of study?"
-    ]
-    
-    return f"Hi {user_name}! 💭 {random.choice(general_questions)} Feel free to share your insights!"
-
-def should_trigger_course_intelligent_question(user_id, current_week):
-    """判斷是否應該觸發課程智能提問"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 檢查用戶本週的互動次數
-        cursor.execute('''
-            SELECT COUNT(*) FROM interactions 
-            WHERE user_id = ? AND created_at >= datetime('now', '-7 days')
-        ''', (user_id,))
-        weekly_interactions = cursor.fetchone()[0]
-        
-        # 檢查用戶今日的互動次數
-        cursor.execute('''
-            SELECT COUNT(*) FROM interactions 
-            WHERE user_id = ? AND DATE(created_at) = DATE('now')
-        ''', (user_id,))
-        daily_interactions = cursor.fetchone()[0]
-        
-        # 檢查是否為專題分享週（需要更多互動）
-        is_project_week = current_week in [3, 5, 7, 9, 12, 14, 16]
-        
-        conn.close()
-        
-        # 觸發條件：週互動少於3次，且今日互動為1次（剛開始參與）
-        if weekly_interactions < 3 and daily_interactions == 1:
-            return True
-        
-        # 專題分享週需要更多互動
-        if is_project_week and weekly_interactions < 5:
-            return True
-        
-        return False
-        
-    except Exception as e:
-        print(f"判斷課程智能提問錯誤: {e}")
-        return False
 
 def is_group_message(event):
     """檢查是否為群組訊息"""
@@ -501,6 +97,101 @@ def is_group_message(event):
         return hasattr(event.source, 'group_id') and event.source.group_id is not None
     except:
         return False
+
+def calculate_quality_score(content):
+    """計算討論品質分數"""
+    score = 1.0
+    content_lower = content.lower()
+    
+    # 長度加分
+    if len(content) > 50: score += 0.5
+    if len(content) > 100: score += 0.5
+    if len(content) > 200: score += 0.5
+    
+    # 學術關鍵詞加分
+    academic_keywords = ['analysis', 'research', 'theory', 'methodology', 'evaluation', 'comparison', 'implementation']
+    if any(keyword in content_lower for keyword in academic_keywords):
+        score += 1.0
+    
+    # 課程相關關鍵詞
+    if any(keyword in content_lower for keyword in ['ai', 'artificial intelligence', 'machine learning']):
+        score += 0.5
+    
+    # 問題或思考性內容
+    if any(char in content for char in ['?', '？']):
+        score += 0.5
+    
+    return min(score, 5.0)
+
+def calculate_english_ratio(content):
+    """計算英語使用比例"""
+    english_chars = sum(1 for c in content if c.isalpha() and ord(c) < 128)
+    total_chars = len(content.replace(' ', ''))
+    return english_chars / max(total_chars, 1) if total_chars > 0 else 0
+
+def detect_message_type(content):
+    """檢測訊息類型"""
+    content_lower = content.lower()
+    if any(char in content for char in ['?', '？']) or any(word in content_lower for word in ['how', 'why', 'what', 'when', 'where', '如何', '為什麼', '什麼時候']):
+        return 'question'
+    elif any(word in content_lower for word in ['i think', 'in my opinion', 'analysis', '我覺得', '我認為', '分析']):
+        return 'discussion'
+    else:
+        return 'response'
+
+def check_course_objectives(content):
+    """檢查是否包含課程目標關鍵詞"""
+    content_lower = content.lower()
+    for objective, keywords in COURSE_OBJECTIVES.items():
+        if any(keyword in content_lower for keyword in keywords):
+            return True
+    return False
+
+def log_interaction(user_id, user_name, content, ai_response, is_group=False):
+    """記錄互動到資料庫"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 確保用戶存在
+        cursor.execute('INSERT OR IGNORE INTO users (user_id, user_name) VALUES (?, ?)', (user_id, user_name))
+        
+        # 分析內容
+        quality_score = calculate_quality_score(content)
+        english_ratio = calculate_english_ratio(content)
+        message_type = detect_message_type(content)
+        contains_keywords = 1 if check_course_objectives(content) else 0
+        group_id = "group" if is_group else None
+        
+        cursor.execute('''
+            INSERT INTO interactions 
+            (user_id, user_name, content, ai_response, message_type, quality_score, 
+             english_ratio, contains_keywords, group_id) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, user_name, content, ai_response, message_type, quality_score, 
+              english_ratio, contains_keywords, group_id))
+        
+        conn.commit()
+        conn.close()
+        print(f"✅ 記錄互動: {user_name}, 品質: {quality_score}, 英語比例: {english_ratio:.2f}")
+        
+    except Exception as e:
+        print(f"❌ 記錄互動失敗: {e}")
+
+def generate_ai_response(message, user_name):
+    """生成AI回應"""
+    current_week = get_current_week()
+    week_info = COURSE_SCHEDULE_18_WEEKS.get(current_week, {})
+    
+    responses = [
+        f"Hi {user_name}! 這週我們討論「{week_info.get('chinese', '課程內容')}」。",
+        f"很好的問題！關於{message[:20]}...",
+        f"根據第{current_week}週的課程內容，我建議...",
+        f"這個觀點很有趣！在AI應用方面..."
+    ]
+    
+    import random
+    return random.choice(responses)
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -525,346 +216,321 @@ def handle_message(event):
             profile = line_bot_api.get_profile(user_id)
             user_name = profile.display_name
         except:
-            user_name = f"User_{user_id[:8]}"
+            user_name = f"User{user_id[:8]}"
         
         # 處理群組訊息
         is_group = is_group_message(event)
         if is_group:
             if not user_message.strip().startswith('@AI'):
                 return
-            
             user_message = user_message.replace('@AI', '').strip()
             if not user_message:
                 user_message = "Hi"
         
-        # 獲取當前課程週次
-        current_week = get_current_course_week()
+        # 生成回應
+        ai_response = generate_ai_response(user_message, user_name)
         
-        # 記錄互動數據（使用課程特定評分）
-        log_course_interaction(user_id, user_name, user_message, is_group, current_week)
-        
-        # 生成課程特定回應
-        if user_message.lower() in ['hi', 'hello', 'help', '幫助']:
-            response = generate_course_contextual_response(user_message, user_name, current_week)
-        else:
-            response = generate_course_specific_response(user_message, user_name, current_week)
-        
-        # 記錄AI回應
-        log_ai_response(user_id, response)
+        # 記錄互動
+        log_interaction(user_id, user_name, user_message, ai_response, is_group)
         
         # 發送回應
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=response)
+            TextSendMessage(text=ai_response)
         )
         
-        # 檢查是否需要智能提問 (簡化版，不使用定時任務)
-        if should_trigger_course_intelligent_question(user_id, current_week):
-            intelligent_question = generate_weekly_intelligent_question(user_name, current_week)
-            # 簡單延遲發送
-            def delayed_course_question():
-                time.sleep(300)  # 5分鐘後發送
-                try:
-                    line_bot_api.push_message(user_id, TextSendMessage(text=intelligent_question))
-                except:
-                    pass
-            
-            threading.Thread(target=delayed_course_question, daemon=True).start()
-        
     except Exception as e:
-        print(f"處理課程訊息錯誤: {e}")
+        print(f"處理訊息錯誤: {e}")
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="抱歉，處理訊息時發生錯誤。請稍後再試。")
+            TextSendMessage(text="抱歉，處理訊息時發生錯誤。")
         )
 
-# 研究數據分析函數
-def get_research_stats():
-    """獲取研究統計數據"""
+# 個人分析功能
+def get_individual_student_analysis(user_id):
+    """獲取個別學生分析"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 總互動次數
-        cursor.execute('SELECT COUNT(*) FROM interactions')
-        total_interactions = cursor.fetchone()[0]
+        cursor.execute('SELECT user_name FROM users WHERE user_id = ?', (user_id,))
+        user_info = cursor.fetchone()
+        if not user_info:
+            return None
         
-        # 活躍學生數
-        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM interactions')
-        active_students = cursor.fetchone()[0]
-        
-        # 今日使用量
-        today = datetime.now().strftime('%Y-%m-%d')
-        cursor.execute('SELECT COUNT(*) FROM interactions WHERE DATE(created_at) = ?', (today,))
-        today_usage = cursor.fetchone()[0]
-        
-        # 平均討論品質
-        cursor.execute('SELECT AVG(quality_score) FROM interactions WHERE quality_score > 0')
-        avg_quality = cursor.fetchone()[0] or 0
-        
-        # 週使用率計算
-        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM interactions WHERE DATE(created_at) >= ?', (week_ago,))
-        weekly_active = cursor.fetchone()[0]
-        
-        total_students = max(active_students, 30)
-        weekly_usage_rate = (weekly_active / total_students) * 100 if total_students > 0 else 0
-        
-        # 平均發言次數
         cursor.execute('''
-            SELECT AVG(interaction_count) FROM (
-                SELECT COUNT(*) as interaction_count 
-                FROM interactions 
-                WHERE DATE(created_at) >= ? 
-                GROUP BY user_id
-            )
-        ''', (week_ago,))
-        avg_interactions = cursor.fetchone()[0] or 0
+            SELECT created_at, message_type, content, quality_score, 
+                   contains_keywords, english_ratio, group_id
+            FROM interactions 
+            WHERE user_id = ?
+            ORDER BY created_at
+        ''', (user_id,))
         
+        interactions = cursor.fetchall()
         conn.close()
         
-        return {
+        if not interactions:
+            return {'user_name': user_info[0], 'analysis_available': False}
+        
+        return analyze_individual_performance(interactions, user_info[0], user_id)
+        
+    except Exception as e:
+        print(f"個人分析錯誤: {e}")
+        return None
+
+def analyze_individual_performance(interactions, user_name, user_id):
+    """分析個人表現"""
+    total_interactions = len(interactions)
+    dates = [datetime.fromisoformat(row[0]).date() for row in interactions]
+    
+    # 參與度分析
+    active_days = len(set(dates))
+    study_period = (max(dates) - min(dates)).days + 1
+    
+    # 品質分析
+    qualities = [row[3] for row in interactions if row[3] > 0]
+    avg_quality = sum(qualities) / len(qualities) if qualities else 0
+    
+    # 英語使用分析
+    english_ratios = [row[5] for row in interactions if row[5] is not None]
+    avg_english = sum(english_ratios) / len(english_ratios) if english_ratios else 0
+    
+    # 提問分析
+    questions = [row for row in interactions if row[1] == 'question']
+    
+    # 主題分析
+    topics = analyze_student_topics(interactions)
+    
+    return {
+        'user_name': user_name,
+        'user_id': user_id,
+        'analysis_date': datetime.now().strftime('%Y-%m-%d'),
+        'study_period_days': study_period,
+        'analysis_available': True,
+        'participation': {
             'total_interactions': total_interactions,
-            'active_students': active_students,
-            'today_usage': today_usage,
+            'active_days': active_days,
+            'avg_weekly_activity': round(total_interactions / max(study_period/7, 1), 1),
+            'participation_level': get_participation_level(total_interactions),
+            'level_color': get_level_color(total_interactions),
+            'consistency_score': round(active_days / study_period * 100, 1)
+        },
+        'quality': {
             'avg_quality': round(avg_quality, 2),
-            'weekly_usage_rate': round(weekly_usage_rate, 1),
-            'avg_interactions_per_user': round(avg_interactions, 1)
-        }
-        
-    except Exception as e:
-        print(f"獲取統計數據錯誤: {e}")
-        return {
-            'total_interactions': 0,
-            'active_students': 0,
-            'today_usage': 0,
-            'avg_quality': 0,
-            'weekly_usage_rate': 0,
-            'avg_interactions_per_user': 0
-        }
+            'high_quality_count': sum(1 for q in qualities if q >= 4.0),
+            'quality_trend': analyze_quality_trend(qualities),
+            'quality_distribution': get_quality_distribution(qualities)
+        },
+        'topics': topics,
+        'english_usage': {
+            'avg_english_ratio': avg_english,
+            'bilingual_ability': get_bilingual_level(avg_english),
+            'english_progress': analyze_english_progress(english_ratios)
+        },
+        'questioning': {
+            'total_questions': len(questions),
+            'question_ratio': len(questions) / total_interactions,
+            'questioning_pattern': get_questioning_pattern(len(questions), total_interactions),
+            'question_topics': analyze_question_topics(questions)
+        },
+        'overall_assessment': generate_assessment(total_interactions, avg_quality, avg_english, len(questions))
+    }
 
-def get_course_specific_analytics():
-    """獲取課程特定的分析數據"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        current_week = get_current_course_week()
-        
-        # 當週主題參與度
-        if current_week in COURSE_SCHEDULE_18_WEEKS:
-            week_keywords = COURSE_SCHEDULE_18_WEEKS[current_week]["keywords"]
-            keyword_conditions = " OR ".join([f"LOWER(content) LIKE '%{keyword}%'" for keyword in week_keywords])
-            
-            cursor.execute(f'''
-                SELECT COUNT(*) FROM interactions 
-                WHERE ({keyword_conditions})
-                AND DATE(created_at) >= DATE('now', '-7 days')
-            ''')
-            weekly_topic_engagement = cursor.fetchone()[0]
-        else:
-            weekly_topic_engagement = 0
-        
-        # 三大課程目標相關討論統計
-        # 1. AI基礎認知
-        cursor.execute('''
-            SELECT COUNT(*) FROM interactions 
-            WHERE (LOWER(content) LIKE '%artificial intelligence%' 
-                OR LOWER(content) LIKE '%machine learning%'
-                OR LOWER(content) LIKE '%algorithm%'
-                OR LOWER(content) LIKE '%智慧%')
-        ''')
-        ai_fundamentals_discussions = cursor.fetchone()[0]
-        
-        # 2. 實務應用
-        cursor.execute('''
-            SELECT COUNT(*) FROM interactions 
-            WHERE (LOWER(content) LIKE '%application%' 
-                OR LOWER(content) LIKE '%practical%'
-                OR LOWER(content) LIKE '%tool%'
-                OR LOWER(content) LIKE '%應用%'
-                OR LOWER(content) LIKE '%實務%')
-        ''')
-        practical_applications_discussions = cursor.fetchone()[0]
-        
-        # 3. 倫理與責任
-        cursor.execute('''
-            SELECT COUNT(*) FROM interactions 
-            WHERE (LOWER(content) LIKE '%ethics%' 
-                OR LOWER(content) LIKE '%responsibility%'
-                OR LOWER(content) LIKE '%privacy%'
-                OR LOWER(content) LIKE '%倫理%'
-                OR LOWER(content) LIKE '%責任%')
-        ''')
-        ethics_discussions = cursor.fetchone()[0]
-        
-        # 英語授課成效
-        cursor.execute('''
-            SELECT AVG(english_ratio) FROM interactions 
-            WHERE english_ratio > 0
-        ''')
-        avg_english_usage = cursor.fetchone()[0] or 0
-        
-        conn.close()
-        
-        return {
-            'current_week': current_week,
-            'current_topic': COURSE_SCHEDULE_18_WEEKS.get(current_week, {}).get('topic', 'N/A'),
-            'weekly_topic_engagement': weekly_topic_engagement,
-            'ai_fundamentals_discussions': ai_fundamentals_discussions,
-            'practical_applications_discussions': practical_applications_discussions,
-            'ethics_discussions': ethics_discussions,
-            'avg_english_usage': round(avg_english_usage, 3),
-            'course_objectives_coverage': {
-                'AI基礎認知': ai_fundamentals_discussions,
-                '實務應用': practical_applications_discussions,
-                '倫理責任': ethics_discussions
-            }
-        }
-        
-    except Exception as e:
-        print(f"獲取課程特定分析錯誤: {e}")
+def analyze_student_topics(interactions):
+    """分析學生主題興趣"""
+    topics_count = Counter()
+    
+    for row in interactions:
+        content = row[2].lower()
+        if any(keyword in content for keyword in ['ai', 'artificial intelligence']):
+            topics_count['AI基礎'] += 1
+        if any(keyword in content for keyword in ['application', 'practical']):
+            topics_count['實務應用'] += 1
+        if any(keyword in content for keyword in ['ethics', 'responsibility']):
+            topics_count['AI倫理'] += 1
+    
+    return {
+        'topic_diversity': len(topics_count),
+        'most_interested_topics': topics_count.most_common(3),
+        'highest_quality_topics': list(topics_count.items())[:3]
+    }
+
+def get_participation_level(interactions):
+    """獲取參與度等級"""
+    if interactions >= 15:
+        return "高度活躍"
+    elif interactions >= 8:
+        return "中度活躍"
+    elif interactions >= 3:
+        return "偶爾參與"
+    else:
+        return "較少參與"
+
+def get_level_color(interactions):
+    """獲取等級顏色"""
+    if interactions >= 15:
+        return "#28a745"
+    elif interactions >= 8:
+        return "#ffc107"
+    elif interactions >= 3:
+        return "#fd7e14"
+    else:
+        return "#dc3545"
+
+def analyze_quality_trend(qualities):
+    """分析品質趨勢"""
+    if len(qualities) < 3:
+        return "數據不足"
+    
+    recent = sum(qualities[-3:]) / 3
+    early = sum(qualities[:3]) / 3
+    
+    if recent > early + 0.5:
+        return "明顯進步"
+    elif recent > early + 0.2:
+        return "穩定進步"
+    else:
+        return "穩定維持"
+
+def get_quality_distribution(qualities):
+    """獲取品質分布"""
+    if not qualities:
         return {}
+    
+    return {
+        '優秀(4.5-5.0)': sum(1 for q in qualities if q >= 4.5),
+        '良好(3.5-4.4)': sum(1 for q in qualities if 3.5 <= q < 4.5),
+        '普通(2.5-3.4)': sum(1 for q in qualities if 2.5 <= q < 3.5),
+        '待改善(<2.5)': sum(1 for q in qualities if q < 2.5)
+    }
 
-def generate_course_progress_html(current_week):
-    """生成課程進度HTML"""
-    html = ""
-    for week in range(1, 19):
-        status = "current" if week == current_week else ("completed" if week < current_week else "upcoming")
-        color = "#28a745" if status == "completed" else ("#007bff" if status == "current" else "#6c757d")
-        
-        html += f'''
-        <div style="background: {color}; color: white; padding: 10px; border-radius: 5px; font-size: 0.8em;">
-            Week {week}
-            <br>
-            {COURSE_SCHEDULE_18_WEEKS.get(week, {}).get('focus', '')}
-        </div>
-        '''
-    return html
+def get_bilingual_level(ratio):
+    """獲取雙語能力等級"""
+    if ratio >= 0.8:
+        return "優秀雙語使用者"
+    elif ratio >= 0.6:
+        return "良好雙語能力"
+    elif ratio >= 0.4:
+        return "中等雙語能力"
+    else:
+        return "主要使用中文"
+
+def analyze_english_progress(ratios):
+    """分析英語進步情況"""
+    if len(ratios) < 3:
+        return "數據不足"
+    
+    recent = sum(ratios[-3:]) / 3
+    early = sum(ratios[:3]) / 3
+    
+    if recent > early + 0.2:
+        return "明顯進步"
+    elif recent > early + 0.1:
+        return "穩定進步"
+    else:
+        return "保持穩定"
+
+def get_questioning_pattern(questions, total):
+    """獲取提問模式"""
+    ratio = questions / max(total, 1)
+    if ratio >= 0.4:
+        return "積極提問者"
+    elif ratio >= 0.2:
+        return "適度提問"
+    else:
+        return "較少提問"
+
+def analyze_question_topics(questions):
+    """分析提問主題"""
+    topics = {}
+    for q in questions:
+        content = q[2].lower()
+        if 'ai' in content:
+            topics['AI技術'] = topics.get('AI技術', 0) + 1
+        elif 'application' in content:
+            topics['實務應用'] = topics.get('實務應用', 0) + 1
+    return topics
+
+def generate_assessment(interactions, quality, english, questions):
+    """生成綜合評估"""
+    scores = []
+    
+    # 參與度分數
+    if interactions >= 15:
+        scores.append(9)
+    elif interactions >= 8:
+        scores.append(7)
+    else:
+        scores.append(5)
+    
+    # 品質分數
+    scores.append(min(quality * 2, 10))
+    
+    # 英語分數
+    scores.append(min(english * 10, 10))
+    
+    overall_score = sum(scores) / len(scores)
+    
+    if overall_score >= 8:
+        level = "優秀"
+    elif overall_score >= 6:
+        level = "良好"
+    else:
+        level = "需改進"
+    
+    return {
+        'overall_score': round(overall_score, 1),
+        'performance_level': level,
+        'learning_style': "穩健學習者",
+        'strengths': ["持續努力中"],
+        'improvement_suggestions': ["建議保持學習節奏"]
+    }
 
 # 網頁路由
-@app.route("/", methods=['GET'])
-def enhanced_home():
+@app.route("/")
+def home():
     """首頁"""
     return '''
     <!DOCTYPE html>
     <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>AI實務應用課程儀表板</title>
+        <title>AI實務應用課程</title>
         <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Microsoft JhengHei', sans-serif; 
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                color: #333;
-            }
-            .container {
-                max-width: 1200px;
-                margin: 0 auto;
-                padding: 2rem;
-            }
-            .header {
-                text-align: center;
-                color: white;
-                margin-bottom: 3rem;
-            }
-            .header h1 {
-                font-size: 2.5rem;
-                margin-bottom: 0.5rem;
-                font-weight: 300;
-            }
-            .header p {
-                font-size: 1.2rem;
-                opacity: 0.9;
-            }
-            .card-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                gap: 2rem;
-                margin-bottom: 3rem;
-            }
-            .card {
-                background: rgba(255, 255, 255, 0.95);
-                border-radius: 15px;
-                padding: 2rem;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-                transition: transform 0.3s ease;
-            }
-            .card:hover {
-                transform: translateY(-5px);
-            }
-            .card h3 {
-                color: #5a67d8;
-                margin-bottom: 1rem;
-                font-size: 1.4rem;
-            }
-            .card p {
-                line-height: 1.6;
-                margin-bottom: 1rem;
-            }
-            .btn {
-                display: inline-block;
-                padding: 0.8rem 2rem;
-                background: #5a67d8;
-                color: white;
-                text-decoration: none;
-                border-radius: 25px;
-                transition: background 0.3s ease;
-                font-weight: 500;
-            }
-            .btn:hover {
-                background: #4c51bf;
-            }
-            .status {
-                display: inline-block;
-                padding: 0.3rem 1rem;
-                background: #48bb78;
-                color: white;
-                border-radius: 15px;
-                font-size: 0.9rem;
-                margin-left: 1rem;
-            }
+            body { font-family: Microsoft JhengHei; margin: 40px; background: #f5f5f5; }
+            .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+            .header { text-align: center; margin-bottom: 40px; color: #333; }
+            .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+            .card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .btn { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
                 <h1>📚 AI在生活與學習上的實務應用</h1>
-                <p>Practical Applications of AI in Life and Learning</p>
-                <p>授課教師：曾郁堯 | 通識教育中心</p>
-                <span class="status">🟢 系統運行中</span>
+                <p>通識教育中心 | 授課教師：曾郁堯</p>
             </div>
-            
-            <div class="card-grid">
+            <div class="cards">
                 <div class="card">
-                    <h3>🎯 課程目標追蹤</h3>
-                    <p>AI基礎認知 + 實務應用 + 倫理責任</p>
-                    <p>透過18週系統性學習，培養AI應用與批判思考能力</p>
-                    <a href="/course_dashboard" class="btn">查看課程儀表板</a>
+                    <h3>👥 個人學習分析</h3>
+                    <p>查看每位學生的詳細學習報告</p>
+                    <a href="/student_list" class="btn">學生列表</a>
                 </div>
-                
                 <div class="card">
-                    <h3>📊 學習成效分析</h3>
-                    <p>即時追蹤學生參與度、討論品質、英語使用比例</p>
-                    <p>支援EMI雙語教學與個人化學習回饋</p>
-                    <a href="/research_dashboard" class="btn">查看研究數據</a>
+                    <h3>📊 班級整體分析</h3>
+                    <p>全班學習狀況和教學成效</p>
+                    <a href="/class_analysis" class="btn">班級分析</a>
                 </div>
-                
                 <div class="card">
-                    <h3>🤖 AI智能助手</h3>
-                    <p>LINE Bot整合18週課程內容，provide 24/7學習支援</p>
-                    <p>根據課程進度主動提問，促進深度學習</p>
-                    <a href="/weekly_report" class="btn">查看週報告</a>
+                    <h3>📈 研究數據</h3>
+                    <p>EMI教學實踐研究數據</p>
+                    <a href="/research_dashboard" class="btn">研究儀表板</a>
                 </div>
-                
                 <div class="card">
-                    <h3>📈 教學研究支援</h3>
-                    <p>完整的學習行為數據記錄與分析</p>
-                    <p>支援教學實踐研究與成果發表</p>
-                    <a href="/export_research_data" class="btn">匯出研究數據</a>
+                    <h3>📄 數據匯出</h3>
+                    <p>匯出完整的學習數據</p>
+                    <a href="/export_research_data" class="btn">匯出數據</a>
                 </div>
             </div>
         </div>
@@ -872,234 +538,442 @@ def enhanced_home():
     </html>
     '''
 
-@app.route("/course_dashboard", methods=['GET'])
-def course_dashboard():
-    """課程特定儀表板"""
-    course_analytics = get_course_specific_analytics()
-    basic_stats = get_research_stats()
-    
-    return f'''
-    <!DOCTYPE html>
-    <html lang="zh-TW">
-    <head>
-        <meta charset="UTF-8">
-        <title>AI實務應用課程儀表板</title>
-        <style>
-            body {{ font-family: 'Microsoft JhengHei', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-            .container {{ max-width: 1400px; margin: 0 auto; }}
-            .header {{ text-align: center; background: white; padding: 30px; border-radius: 10px; margin-bottom: 20px; }}
-            .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }}
-            .card {{ background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-            .metric {{ text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px; margin: 10px 0; }}
-            .metric-value {{ font-size: 2em; font-weight: bold; color: #007bff; }}
-            .progress-bar {{ width: 100%; height: 10px; background: #e9ecef; border-radius: 5px; margin: 10px 0; }}
-            .progress-fill {{ height: 100%; background: linear-gradient(90deg, #007bff, #28a745); border-radius: 5px; }}
-            .objective {{ background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0; }}
-            .week-info {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>📚 AI在生活與學習上的實務應用 - 課程儀表板</h1>
-                <p>Practical Applications of AI in Life and Learning</p>
-                <p>授課教師：曾郁堯 | 更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            </div>
-            
-            <div class="grid">
-                <div class="card">
-                    <div class="week-info">
-                        <h2>📅 當前課程進度</h2>
-                        <p><strong>第 {course_analytics.get('current_week', 'N/A')} 週</strong></p>
-                        <p>{course_analytics.get('current_topic', 'N/A')}</p>
-                        <p>本週主題參與：{course_analytics.get('weekly_topic_engagement', 0)} 次討論</p>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h3>🎯 三大課程目標達成情況</h3>
-                    <div class="objective">
-                        <h4>AI基礎認知</h4>
-                        <p>{course_analytics.get('ai_fundamentals_discussions', 0)} 次相關討論</p>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: {min(course_analytics.get('ai_fundamentals_discussions', 0) * 10, 100)}%"></div>
-                        </div>
-                    </div>
-                    <div class="objective">
-                        <h4>實務應用</h4>
-                        <p>{course_analytics.get('practical_applications_discussions', 0)} 次相關討論</p>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: {min(course_analytics.get('practical_applications_discussions', 0) * 10, 100)}%"></div>
-                        </div>
-                    </div>
-                    <div class="objective">
-                        <h4>倫理與責任</h4>
-                        <p>{course_analytics.get('ethics_discussions', 0)} 次相關討論</p>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: {min(course_analytics.get('ethics_discussions', 0) * 10, 100)}%"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h3>🌐 英語授課成效</h3>
-                    <div class="metric">
-                        <div class="metric-value">{course_analytics.get('avg_english_usage', 0):.1%}</div>
-                        <p>平均英語使用比例</p>
-                    </div>
-                    <p>{"✅ 英語使用良好" if course_analytics.get('avg_english_usage', 0) > 0.6 else "⚠️ 建議增加英語互動"}</p>
-                </div>
-                
-                <div class="card">
-                    <h3>📊 基礎統計數據</h3>
-                    <div class="metric">
-                        <div class="metric-value">{basic_stats['total_interactions']}</div>
-                        <p>總互動次數</p>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-value">{basic_stats['active_students']}</div>
-                        <p>活躍學生數</p>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-value">{basic_stats['avg_quality']}</div>
-                        <p>平均討論品質</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="card" style="margin-top: 20px;">
-                <h3>📝 18週課程規劃進度</h3>
-                <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; text-align: center;">
-                    {generate_course_progress_html(course_analytics.get('current_week', 1))}
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    '''
+@app.route("/student_list")
+def student_list():
+    """學生列表"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT u.user_id, u.user_name, COUNT(i.id) as total_interactions,
+                   AVG(i.quality_score) as avg_quality
+            FROM users u
+            LEFT JOIN interactions i ON u.user_id = i.user_id
+            GROUP BY u.user_id, u.user_name
+            ORDER BY total_interactions DESC
+        ''')
+        
+        students = cursor.fetchall()
+        conn.close()
+        
+        html = '''
+        <!DOCTYPE html>
+        <html lang="zh-TW">
+        <head>
+            <meta charset="UTF-8">
+            <title>學生列表</title>
+            <style>
+                body { font-family: Microsoft JhengHei; margin: 40px; }
+                table { width: 100%; border-collapse: collapse; }
+                th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+                th { background: #f8f9fa; }
+                .btn { padding: 6px 12px; background: #007bff; color: white; text-decoration: none; border-radius: 3px; }
+            </style>
+        </head>
+        <body>
+            <h1>👥 學生個人分析列表</h1>
+            <table>
+                <tr>
+                    <th>學生姓名</th>
+                    <th>互動次數</th>
+                    <th>平均品質</th>
+                    <th>操作</th>
+                </tr>
+        '''
+        
+        for student in students:
+            user_id, user_name, interactions, quality = student
+            html += f'''
+                <tr>
+                    <td>{user_name}</td>
+                    <td>{interactions or 0}</td>
+                    <td>{quality:.2f if quality else 0}</td>
+                    <td><a href="/student_analysis/{user_id}" class="btn">詳細分析</a></td>
+                </tr>
+            '''
+        
+        html += '''
+            </table>
+        </body>
+        </html>
+        '''
+        
+        return html
+        
+    except Exception as e:
+        return f"錯誤: {e}"
 
-@app.route("/research_dashboard", methods=['GET'])
-def research_dashboard():
-    """研究數據儀表板"""
-    stats = get_research_stats()
-    current_week = get_current_course_week()
+@app.route("/student_analysis/<user_id>")
+def student_analysis(user_id):
+    """個人分析頁面"""
+    analysis = get_individual_student_analysis(user_id)
     
-    return f'''
-    <!DOCTYPE html>
-    <html lang="zh-TW">
-    <head>
-        <meta charset="UTF-8">
-        <title>EMI研究儀表板</title>
-        <style>
-            body {{ font-family: 'Microsoft JhengHei', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-            .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
-            .header {{ text-align: center; margin-bottom: 30px; }}
-            .metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }}
-            .metric-card {{ background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; }}
-            .metric-value {{ font-size: 2em; font-weight: bold; color: #007bff; }}
-            .metric-label {{ color: #666; margin-top: 5px; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>📊 EMI教學研究數據儀表板</h1>
-                <p>更新時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 當前週次: 第{current_week}週</p>
-            </div>
-            
-            <div class="metrics">
-                <div class="metric-card">
-                    <div class="metric-value">{stats['total_interactions']}</div>
-                    <div class="metric-label">總互動次數</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">{stats['active_students']}</div>
-                    <div class="metric-label">活躍學生數</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">{stats['today_usage']}</div>
-                    <div class="metric-label">今日使用量</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">{stats['weekly_usage_rate']}%</div>
-                    <div class="metric-label">週使用率</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">{stats['avg_interactions_per_user']}</div>
-                    <div class="metric-label">平均發言次數/週</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">{stats['avg_quality']}/5.0</div>
-                    <div class="metric-label">討論品質平均分</div>
-                </div>
-            </div>
+    if not analysis or not analysis.get('analysis_available'):
+        return '''
+        <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
+            <h2>📊 個人學習分析</h2>
+            <p>此學生暫無足夠的互動數據進行分析。</p>
         </div>
-    </body>
-    </html>
-    '''
-
-@app.route("/weekly_report", methods=['GET'])
-def weekly_report():
-    """週報告頁面"""
-    stats = get_research_stats()
-    current_week = get_current_course_week()
+        '''
     
     return f'''
     <!DOCTYPE html>
     <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
-        <title>AI課程週報告</title>
+        <title>{analysis['user_name']} - 個人分析</title>
         <style>
-            body {{ font-family: 'Microsoft JhengHei', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-            .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
-            .header {{ text-align: center; margin-bottom: 30px; border-bottom: 2px solid #eee; padding-bottom: 20px; }}
-            .section {{ margin: 20px 0; }}
-            .stat-grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 15px 0; }}
-            .stat-item {{ background: #f8f9fa; padding: 15px; border-radius: 5px; text-align: center; }}
+            body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
+            .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+            .header {{ text-align: center; margin-bottom: 30px; color: #333; }}
+            .section {{ margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; }}
+            .metric {{ display: flex; justify-content: space-between; margin: 10px 0; }}
+            .value {{ font-weight: bold; color: #007bff; }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>📊 AI實務應用課程週報告</h1>
-                <p>第{current_week}週 • {datetime.now().strftime('%Y年%m月%d日')}</p>
+                <h1>📊 {analysis['user_name']} 個人學習分析</h1>
+                <p>分析日期：{analysis['analysis_date']} | 學習期間：{analysis['study_period_days']} 天</p>
+                <p><strong>綜合表現：{analysis['overall_assessment']['performance_level']} ({analysis['overall_assessment']['overall_score']}/10)</strong></p>
             </div>
             
             <div class="section">
-                <h2>📈 本週數據摘要</h2>
-                <div class="stat-grid">
-                    <div class="stat-item">
-                        <div style="font-size: 1.5em; font-weight: bold;">{stats['total_interactions']}</div>
-                        <div>總互動次數</div>
+                <h3>👥 參與度分析</h3>
+                <div class="metric">
+                    <span>總互動次數</span>
+                    <span class="value">{analysis['participation']['total_interactions']}</span>
+                </div>
+                <div class="metric">
+                    <span>活躍天數</span>
+                    <span class="value">{analysis['participation']['active_days']} 天</span>
+                </div>
+                <div class="metric">
+                    <span>參與度等級</span>
+                    <span class="value">{analysis['participation']['participation_level']}</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>💎 討論品質分析</h3>
+                <div class="metric">
+                    <span>平均品質分數</span>
+                    <span class="value">{analysis['quality']['avg_quality']}/5.0</span>
+                </div>
+                <div class="metric">
+                    <span>高品質討論次數</span>
+                    <span class="value">{analysis['quality']['high_quality_count']} 次</span>
+                </div>
+                <div class="metric">
+                    <span>品質趨勢</span>
+                    <span class="value">{analysis['quality']['quality_trend']}</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>🌍 英語使用分析</h3>
+                <div class="metric">
+                    <span>平均英語使用比例</span>
+                    <span class="value">{analysis['english_usage']['avg_english_ratio']:.1%}</span>
+                </div>
+                <div class="metric">
+                    <span>雙語能力評估</span>
+                    <span class="value">{analysis['english_usage']['bilingual_ability']}</span>
+                </div>
+                <div class="metric">
+                    <span>英語使用進步</span>
+                    <span class="value">{analysis['english_usage']['english_progress']}</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>❓ 提問行為分析</h3>
+                <div class="metric">
+                    <span>總提問次數</span>
+                    <span class="value">{analysis['questioning']['total_questions']}</span>
+                </div>
+                <div class="metric">
+                    <span>提問比例</span>
+                    <span class="value">{analysis['questioning']['question_ratio']:.1%}</span>
+                </div>
+                <div class="metric">
+                    <span>提問模式</span>
+                    <span class="value">{analysis['questioning']['questioning_pattern']}</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>🎯 學習主題分析</h3>
+                <div class="metric">
+                    <span>討論主題多樣性</span>
+                    <span class="value">{analysis['topics']['topic_diversity']} 個主題</span>
+                </div>
+                <div class="metric">
+                    <span>最感興趣主題</span>
+                    <span class="value">{', '.join([f"{topic}({count}次)" for topic, count in analysis['topics']['most_interested_topics']]) if analysis['topics']['most_interested_topics'] else '尚未識別'}</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>🌟 學習風格與建議</h3>
+                <p><strong>學習風格：</strong>{analysis['overall_assessment']['learning_style']}</p>
+                <p><strong>主要優勢：</strong>{', '.join(analysis['overall_assessment']['strengths'])}</p>
+                <p><strong>改進建議：</strong>{', '.join(analysis['overall_assessment']['improvement_suggestions'])}</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+
+@app.route("/class_analysis")
+def class_analysis():
+    """班級分析頁面"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 獲取班級統計
+        cursor.execute('''
+            SELECT COUNT(DISTINCT u.user_id) as total_students,
+                   COUNT(DISTINCT CASE WHEN i.id IS NOT NULL THEN u.user_id END) as active_students,
+                   AVG(i.quality_score) as avg_quality,
+                   AVG(i.english_ratio) as avg_english,
+                   COUNT(i.id) as total_interactions
+            FROM users u
+            LEFT JOIN interactions i ON u.user_id = i.user_id
+        ''')
+        
+        stats = cursor.fetchone()
+        
+        # 獲取學生排名
+        cursor.execute('''
+            SELECT u.user_name, COUNT(i.id) as interactions,
+                   AVG(i.quality_score) as avg_quality,
+                   AVG(i.english_ratio) as avg_english
+            FROM users u
+            LEFT JOIN interactions i ON u.user_id = i.user_id
+            GROUP BY u.user_id, u.user_name
+            ORDER BY interactions DESC
+            LIMIT 10
+        ''')
+        
+        rankings = cursor.fetchall()
+        conn.close()
+        
+        total_students, active_students, avg_quality, avg_english, total_interactions = stats
+        participation_rate = (active_students / total_students * 100) if total_students > 0 else 0
+        
+        return f'''
+        <!DOCTYPE html>
+        <html lang="zh-TW">
+        <head>
+            <meta charset="UTF-8">
+            <title>班級整體分析</title>
+            <style>
+                body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
+                .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+                .header {{ text-align: center; margin-bottom: 30px; color: #333; }}
+                .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }}
+                .stat-card {{ background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; }}
+                .stat-value {{ font-size: 2em; font-weight: bold; color: #007bff; }}
+                .section {{ margin: 30px 0; }}
+                table {{ width: 100%; border-collapse: collapse; }}
+                th, td {{ padding: 12px; border: 1px solid #ddd; text-align: left; }}
+                th {{ background: #f8f9fa; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>📊 AI實務應用課程 - 班級整體分析</h1>
+                    <p>分析時間：{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">{total_students or 0}</div>
+                        <div>班級總人數</div>
                     </div>
-                    <div class="stat-item">
-                        <div style="font-size: 1.5em; font-weight: bold;">{stats['active_students']}</div>
+                    <div class="stat-card">
+                        <div class="stat-value">{active_students or 0}</div>
                         <div>活躍學生數</div>
                     </div>
-                    <div class="stat-item">
-                        <div style="font-size: 1.5em; font-weight: bold;">{stats['weekly_usage_rate']}%</div>
-                        <div>週使用率</div>
+                    <div class="stat-card">
+                        <div class="stat-value">{participation_rate:.1f}%</div>
+                        <div>參與率</div>
                     </div>
-                    <div class="stat-item">
-                        <div style="font-size: 1.5em; font-weight: bold;">{stats['avg_quality']}</div>
-                        <div>平均品質分</div>
+                    <div class="stat-card">
+                        <div class="stat-value">{avg_quality:.2f if avg_quality else 0}</div>
+                        <div>平均討論品質</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{avg_english:.1%} if avg_english else 0%</div>
+                        <div>平均英語使用</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{total_interactions or 0}</div>
+                        <div>總互動次數</div>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h2>🏆 學生表現排行榜 (Top 10)</h2>
+                    <table>
+                        <tr>
+                            <th>排名</th>
+                            <th>學生姓名</th>
+                            <th>互動次數</th>
+                            <th>平均品質</th>
+                            <th>英語使用比例</th>
+                        </tr>
+        '''
+        
+        for i, (name, interactions, quality, english) in enumerate(rankings, 1):
+            rank_color = "#ffd700" if i <= 3 else "#c0c0c0" if i <= 5 else "#cd7f32"
+            html_part = f'''
+                        <tr>
+                            <td style="background: {rank_color}; color: white; font-weight: bold; text-align: center;">{i}</td>
+                            <td><strong>{name}</strong></td>
+                            <td>{interactions or 0}</td>
+                            <td>{quality:.2f if quality else 0}</td>
+                            <td>{english:.1%} if english else 0%</td>
+                        </tr>
+            '''
+        
+        html_end = '''
+                    </table>
+                </div>
+                
+                <div class="section">
+                    <h2>💡 教學改進建議</h2>
+                    <div style="background: #d4edda; padding: 20px; border-radius: 8px; border-left: 4px solid #28a745;">
+        '''
+        
+        # 生成建議
+        suggestions = []
+        if participation_rate < 70:
+            suggestions.append("📈 班級參與率偏低，建議增加互動式活動和小組討論")
+        if avg_quality and avg_quality < 3.0:
+            suggestions.append("📚 整體討論品質需要提升，建議提供更多優質範例")
+        if avg_english and avg_english < 0.4:
+            suggestions.append("🌍 英語使用比例偏低，建議設計更多英語互動活動")
+        
+        if not suggestions:
+            suggestions.append("✨ 班級整體表現良好，繼續保持並持續優化教學方法")
+        
+        for suggestion in suggestions:
+            html_end += f"<p>{suggestion}</p>"
+        
+        html_end += '''
                     </div>
                 </div>
             </div>
-            
-            <div class="section">
-                <h2>🎯 課程目標達成情況</h2>
-                <p><strong>週使用率:</strong> {stats['weekly_usage_rate']}% {'✅ 已達標' if stats['weekly_usage_rate'] >= 70 else '❌ 未達標 (目標≥70%)'}</p>
-                <p><strong>平均發言次數:</strong> {stats['avg_interactions_per_user']}次/週 {'✅ 已達標' if stats['avg_interactions_per_user'] >= 5 else '❌ 未達標 (目標≥5次)'}</p>
-                <p><strong>討論品質:</strong> {stats['avg_quality']}/5.0 {'✅ 良好' if stats['avg_quality'] >= 3.0 else '⚠️ 待改善'}</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    '''
+        </body>
+        </html>
+        '''
+        
+        return html_part + html_end
+        
+    except Exception as e:
+        return f"錯誤: {e}"
 
-@app.route("/export_research_data", methods=['GET'])
+@app.route("/research_dashboard")
+def research_dashboard():
+    """研究儀表板"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 基本統計
+        cursor.execute('SELECT COUNT(*) FROM interactions')
+        total_interactions = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM interactions')
+        active_students = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM interactions WHERE date(created_at) = date("now")')
+        today_usage = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT AVG(quality_score) FROM interactions WHERE quality_score > 0')
+        avg_quality = cursor.fetchone()[0] or 0
+        
+        cursor.execute('SELECT AVG(english_ratio) FROM interactions WHERE english_ratio IS NOT NULL')
+        avg_english = cursor.fetchone()[0] or 0
+        
+        conn.close()
+        
+        return f'''
+        <!DOCTYPE html>
+        <html lang="zh-TW">
+        <head>
+            <meta charset="UTF-8">
+            <title>EMI教學研究數據儀表板</title>
+            <style>
+                body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
+                .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+                .header {{ text-align: center; margin-bottom: 30px; color: #333; }}
+                .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }}
+                .metric-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 15px; text-align: center; }}
+                .metric-value {{ font-size: 2.5em; font-weight: bold; margin-bottom: 10px; }}
+                .metric-label {{ font-size: 1.1em; opacity: 0.9; }}
+                .status {{ background: #28a745; color: white; padding: 8px 16px; border-radius: 20px; display: inline-block; margin-top: 20px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>📊 EMI教學研究數據儀表板</h1>
+                    <p>AI在生活與學習上的實務應用 - 教學實踐研究</p>
+                    <span class="status">🟢 系統正常運行</span>
+                </div>
+                
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value">{total_interactions}</div>
+                        <div class="metric-label">總互動次數</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{active_students}</div>
+                        <div class="metric-label">活躍學生數</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{today_usage}</div>
+                        <div class="metric-label">今日使用量</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{avg_quality:.1f}/5.0</div>
+                        <div class="metric-label">討論品質平均分</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{avg_english:.1%}</div>
+                        <div class="metric-label">英語使用比例</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">第{get_current_week()}週</div>
+                        <div class="metric-label">當前課程進度</div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 40px; text-align: center;">
+                    <h2>🎯 教學實踐研究目標</h2>
+                    <p>透過生成式AI輔助雙語教學，提升EMI課程學生參與度與跨文化能力</p>
+                    <div style="margin-top: 20px;">
+                        <a href="/export_research_data" style="padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">📄 匯出研究數據</a>
+                        <a href="/student_list" style="padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">👥 查看學生分析</a>
+                        <a href="/class_analysis" style="padding: 12px 24px; background: #17a2b8; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">📊 班級整體分析</a>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+        
+    except Exception as e:
+        return f"錯誤: {e}"
+
+@app.route("/export_research_data")
 def export_research_data():
     """匯出研究數據"""
     try:
@@ -1107,68 +981,46 @@ def export_research_data():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT 
-                i.created_at,
-                u.user_name,
-                i.message_type,
-                i.content,
-                i.quality_score,
-                i.contains_keywords,
-                i.english_ratio,
-                i.group_id
-            FROM interactions i
-            JOIN users u ON i.user_id = u.user_id
-            ORDER BY i.created_at DESC
+            SELECT u.user_name, i.created_at, i.content, i.message_type,
+                   i.quality_score, i.english_ratio, i.contains_keywords, i.group_id
+            FROM users u
+            JOIN interactions i ON u.user_id = i.user_id
+            ORDER BY i.created_at
         ''')
         
-        results = cursor.fetchall()
+        data = cursor.fetchall()
         conn.close()
         
-        csv_content = "時間,學生姓名,訊息類型,內容,品質分數,包含關鍵詞,英語比例,群組ID\n"
-        for row in results:
-            content = row[3].replace('"', '""')[:50] + "..." if len(row[3]) > 50 else row[3].replace('"', '""')
-            csv_content += f'"{row[0]}","{row[1]}","{row[2]}","{content}",{row[4]},{row[5]},{row[6]},"{row[7] or ""}"\n'
+        # 生成CSV格式
+        csv_content = "學生姓名,時間,內容,訊息類型,品質分數,英語比例,包含關鍵詞,群組互動\n"
+        for row in data:
+            csv_content += f'"{row[0]}","{row[1]}","{row[2][:50]}...","{row[3]}",{row[4]},{row[5]},{row[6]},"{row[7] or ""}"\n'
         
-        return csv_content, 200, {
-            'Content-Type': 'text/csv; charset=utf-8',
-            'Content-Disposition': f'attachment; filename="ai_course_data_{datetime.now().strftime("%Y%m%d")}.csv"'
-        }
+        from flask import Response
+        return Response(
+            csv_content,
+            mimetype="text/csv",
+            headers={"Content-disposition": "attachment; filename=research_data.csv"}
+        )
         
     except Exception as e:
-        return f"匯出失敗: {e}", 500
-
-@app.route("/test_routes")
-def test_routes():
-    """測試路由"""
-    routes = []
-    for rule in app.url_map.iter_rules():
-        routes.append(f"{list(rule.methods)} {rule.rule} -> {rule.endpoint}")
-    
-    return "<br>".join([f"<h2>Total routes: {len(routes)}</h2>"] + routes)
+        return f"匯出錯誤: {e}"
 
 @app.route("/health")
 def health_check():
     """健康檢查"""
-    return "OK"
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "system": "AI課程分析系統",
+        "version": "2.0"
+    })
 
-# 初始化
-init_database()
-
-# Gunicorn 應用物件
-application = app
-
+# 初始化資料庫
 if __name__ == "__main__":
-    current_week = get_current_course_week()
-    print("📚 AI在生活與學習上的實務應用 - 課程系統啟動")
-    print(f"🗓️ 當前週次：第 {current_week} 週")
-    print(f"📖 本週主題：{COURSE_SCHEDULE_18_WEEKS.get(current_week, {}).get('topic', 'N/A')}")
-    print("🎯 課程目標：AI基礎認知 + 實務應用 + 倫理責任")
-    print("🌐 授課語言：英語 (EMI)")
-    print("📊 功能：智能問答 + 學習追蹤 + 成效分析")
-    
-    # 顯示註冊的路由
-    print("\n📝 系統路由：")
-    for rule in app.url_map.iter_rules():
-        print(f"  {rule.rule} -> {rule.endpoint}")
-    
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)), debug=True)
+    init_db()
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+# Gunicorn 兼容性
+application = app
