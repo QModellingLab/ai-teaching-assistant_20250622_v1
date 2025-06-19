@@ -1476,6 +1476,22 @@ def system_status():
         }, 500
 
 # =============================================================================
+# Railway/Gunicorn 兼容性設定
+# =============================================================================
+
+# 給 Gunicorn 使用的 application 物件
+application = app
+
+@app.route("/test_routes")
+def test_routes():
+    """測試所有路由是否正常載入"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append(f"{list(rule.methods)} {rule.rule} -> {rule.endpoint}")
+    
+    return "<br>".join([f"<h2>Total routes: {len(routes)}</h2>"] + routes)
+
+# =============================================================================
 # 測試功能
 # =============================================================================
 
@@ -1558,9 +1574,6 @@ if __name__ == "__main__":
         print("• EMI teaching support with bilingual assistance")
         print("=" * 70)
         
-        # 可選：執行系統測試
-        # test_complete_system()
-        
         print("🎯 Research Targets:")
         print("• Weekly Usage Rate: ≥ 70%")
         print("• Average Messages per Week: ≥ 5")
@@ -1568,15 +1581,24 @@ if __name__ == "__main__":
         print("• Student Engagement Improvement: +30%")
         print("=" * 70)
         print("🌐 Available Endpoints:")
-        print("• /research_dashboard - Comprehensive analytics dashboard")
-        print("• /weekly_report - Weekly teaching effectiveness report")
-        print("• /export_research_data - Export data for academic analysis")
-        print("• /health - System health monitoring")
-        print("• /system_status - Real-time system status API")
+        
+        # 列出所有註冊的路由
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint != 'static':
+                print(f"• {rule.rule} - {rule.endpoint}")
+        
         print("=" * 70)
     else:
         print("❌ 資料庫初始化失敗，使用基本功能")
     
     # Railway部署設定
     port = int(os.environ.get('PORT', 5000))
+    
+    # 強制顯示所有路由（調試用）
+    print("\n🔍 註冊的路由列表：")
+    for rule in app.url_map.iter_rules():
+        print(f"  {rule.methods} {rule.rule} -> {rule.endpoint}")
+    
+    # 啟動應用
+    print(f"\n🚀 Starting Flask app on port {port}...")
     app.run(host='0.0.0.0', port=port, debug=False)
