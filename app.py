@@ -6,7 +6,7 @@ from flask import Flask, request, abort, render_template_string, jsonify
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from linebot.models.sources import GroupSource
+from linebot.models import GroupSource
 import random
 
 app = Flask(__name__)
@@ -234,7 +234,7 @@ def handle_message(event):
             user_name = f"User_{user_id[:8]}"
         
         # 處理群組訊息 - 只有@提到bot才回應
-        is_group_message = isinstance(event.source, GroupSource)
+        is_group_message = hasattr(event.source, 'group_id')
         if is_group_message:
             if not user_message.strip().startswith('@AI'):
                 return
