@@ -2,6 +2,11 @@ import os
 import sqlite3
 from datetime import datetime, timedelta
 import re
+import json
+from collections import Counter
+import schedule
+import threading
+import time
 from flask import Flask, request, abort, render_template_string, jsonify
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -13,6 +18,162 @@ app = Flask(__name__)
 # LINE Bot 設定
 line_bot_api = LineBotApi(os.environ['LINE_CHANNEL_ACCESS_TOKEN'])
 handler = WebhookHandler(os.environ['LINE_CHANNEL_SECRET'])
+
+# 18週課程進度與智能提問系統
+COURSE_SCHEDULE_18_WEEKS = {
+    1: {
+        "topic": "Course Introduction and AI Era Overview",
+        "chinese": "課程介紹,人工智慧如何改變我們的生活?",
+        "keywords": ["artificial intelligence", "ai overview", "transformation", "introduction"],
+        "focus": "基礎認知"
+    },
+    2: {
+        "topic": "Generative AI Technologies and Applications",
+        "chinese": "生成式AI技術與應用：大型語言模型實務操作",
+        "keywords": ["generative ai", "chatgpt", "claude", "large language models", "llm"],
+        "focus": "實務操作"
+    },
+    3: {
+        "topic": "Student Project Sharing - Generative AI Cases",
+        "chinese": "學生專題分享：生成式AI實際應用案例報告",
+        "keywords": ["project sharing", "case study", "generative ai applications"],
+        "focus": "專題分享"
+    },
+    4: {
+        "topic": "AI Applications in Learning",
+        "chinese": "AI在學習領域的應用：學習輔助工具、知識管理系統",
+        "keywords": ["learning tools", "knowledge management", "education ai", "study assistant"],
+        "focus": "學習應用"
+    },
+    5: {
+        "topic": "Student Project Sharing - AI Learning Tools",
+        "chinese": "學生專題分享：AI學習工具使用經驗與成效報告",
+        "keywords": ["learning tools experience", "effectiveness report", "ai study"],
+        "focus": "專題分享"
+    },
+    6: {
+        "topic": "AI in Creative and Professional Fields",
+        "chinese": "AI在創意與職場的應用：內容創作、工作流程優化",
+        "keywords": ["content creation", "workflow optimization", "creative ai", "professional"],
+        "focus": "職場應用"
+    },
+    7: {
+        "topic": "Student Project Sharing - Creative AI Applications",
+        "chinese": "學生專題分享：AI在創意與職場的創新應用展示",
+        "keywords": ["creative applications", "innovation showcase", "professional ai"],
+        "focus": "專題分享"
+    },
+    8: {
+        "topic": "AI Tool Development and Customization",
+        "chinese": "AI工具開發與客製化：無程式碼平台應用",
+        "keywords": ["no-code platform", "tool development", "customization", "personalized ai"],
+        "focus": "工具開發"
+    },
+    9: {
+        "topic": "Student Project Sharing - Custom AI Tools",
+        "chinese": "學生專題分享：自製AI工具開發過程與成果展示",
+        "keywords": ["custom tools", "development process", "tool showcase"],
+        "focus": "專題分享"
+    },
+    10: {
+        "topic": "Fundamentals of AI (I) - Core Concepts",
+        "chinese": "AI基礎概念(一)：核心概念、運作原理與技術架構",
+        "keywords": ["core concepts", "operational principles", "technical architecture", "fundamentals"],
+        "focus": "理論基礎"
+    },
+    11: {
+        "topic": "Fundamentals of AI (II) - Trends and Prospects",
+        "chinese": "AI基礎概念(二)：發展趨勢與應用展望",
+        "keywords": ["development trends", "application prospects", "future ai"],
+        "focus": "理論基礎"
+    },
+    12: {
+        "topic": "Student Project Sharing - AI Fundamental Analysis",
+        "chinese": "學生專題分享：AI基礎概念關鍵議題研析",
+        "keywords": ["fundamental analysis", "key issues", "concept discussion"],
+        "focus": "專題分享"
+    },
+    13: {
+        "topic": "Industry 4.0 and Smart Manufacturing",
+        "chinese": "工業4.0與智慧製造：AI在工業領域的革新應用",
+        "keywords": ["industry 4.0", "smart manufacturing", "industrial ai", "manufacturing"],
+        "focus": "工業應用"
+    },
+    14: {
+        "topic": "Student Project Sharing - AI Manufacturing Cases",
+        "chinese": "學生專題分享：AI輔助製造案例分析報告",
+        "keywords": ["manufacturing cases", "industrial analysis", "ai manufacturing"],
+        "focus": "專題分享"
+    },
+    15: {
+        "topic": "AI in Home and Daily Life",
+        "chinese": "AI在家庭與日常生活的應用：智慧家居、健康管理",
+        "keywords": ["smart home", "health management", "daily life", "home automation"],
+        "focus": "生活應用"
+    },
+    16: {
+        "topic": "Student Project Sharing - Daily Life AI Innovations",
+        "chinese": "學生專題分享：生活中的AI創新應用提案",
+        "keywords": ["daily life innovation", "application proposals", "life quality"],
+        "focus": "專題分享"
+    },
+    17: {
+        "topic": "Final Exam",
+        "chinese": "期末考試",
+        "keywords": ["final exam", "assessment", "evaluation"],
+        "focus": "評量"
+    },
+    18: {
+        "topic": "Flexible Teaching Week",
+        "chinese": "彈性教學週：自主學習指定教材",
+        "keywords": ["flexible learning", "self-directed", "review"],
+        "focus": "自主學習"
+    }
+}
+
+# 針對不同週次的智能提問題庫
+WEEKLY_INTELLIGENT_QUESTIONS = {
+    1: [
+        "How do you think AI has already changed your daily routine without you realizing it?",
+        "What aspects of AI transformation do you find most exciting or concerning?",
+        "Can you identify three AI applications you use regularly in your life?"
+    ],
+    2: [
+        "What's your experience with ChatGPT or Claude so far? Which tasks do you find them most helpful for?",
+        "How do you think generative AI might change the way we create content and communicate?",
+        "What are the main differences you've noticed between different large language models?"
+    ],
+    4: [
+        "Which AI learning tools have you tried, and how effective were they for your studies?",
+        "How might AI-powered knowledge management systems change the way we organize information?",
+        "What challenges do you face when using AI for learning, and how do you overcome them?"
+    ],
+    6: [
+        "How could AI tools enhance creativity rather than replace human creativity?",
+        "What workflow optimizations have you implemented using AI in your work or studies?",
+        "What ethical considerations should we keep in mind when using AI for content creation?"
+    ],
+    8: [
+        "What kind of personalized AI tool would be most useful for your specific needs?",
+        "How do no-code platforms democratize AI development for non-technical users?",
+        "What are the limitations of no-code AI development compared to traditional programming?"
+    ],
+    10: [
+        "How do you explain the core concepts of AI to someone with no technical background?",
+        "What misconceptions about AI do you think are most common among the general public?",
+        "How do the operational principles of AI relate to human intelligence?"
+    ],
+    13: [
+        "How might Industry 4.0 change the job market and required skills in manufacturing?",
+        "What are the main benefits and challenges of implementing AI in industrial settings?",
+        "How can traditional manufacturers transition to smart manufacturing successfully?"
+    ],
+    15: [
+        "What smart home applications do you think will become mainstream in the next 5 years?",
+        "How can AI improve health management while protecting personal privacy?",
+        "What daily life tasks would you most like to see enhanced by AI?"
+    ]
+}
 
 # 資料庫初始化
 def init_database():
@@ -66,6 +227,17 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+def get_current_course_week():
+    """獲取當前課程週次（基於學期開始日期計算）"""
+    # 假設學期開始日期為2025年2月24日（第1週）
+    semester_start = datetime(2025, 2, 24)
+    current_date = datetime.now()
+    
+    days_passed = (current_date - semester_start).days
+    current_week = min(max(1, days_passed // 7 + 1), 18)
+    
+    return current_week
+
 def classify_message_type(message):
     """分類訊息類型"""
     message_lower = message.lower()
@@ -78,49 +250,81 @@ def classify_message_type(message):
     else:
         return 'response'
 
-def calculate_quality_score(message):
-    """計算討論品質分數（1-5分）"""
-    score = 1.0
-    
-    # 長度加分
-    if len(message) > 50:
-        score += 1.0
-    if len(message) > 100:
-        score += 0.5
-    
-    # 問號加分（提問）
-    if '?' in message:
-        score += 0.5
-    
-    # 學術關鍵詞加分
-    if contains_academic_keywords(message):
-        score += 1.0
-    
-    # 英語使用加分
-    english_ratio = calculate_english_ratio(message)
-    if english_ratio > 0.3:
-        score += 0.5
-    
-    return min(score, 5.0)
-
-def contains_academic_keywords(message):
-    """檢查是否包含學術關鍵詞"""
-    academic_keywords = [
-        'analysis', 'research', 'study', 'theory', 'concept', 'methodology',
-        'data', 'evidence', 'hypothesis', 'conclusion', 'literature',
-        '分析', '研究', '理論', '概念', '方法', '數據', '證據'
-    ]
-    message_lower = message.lower()
-    return any(keyword in message_lower for keyword in academic_keywords)
-
 def calculate_english_ratio(message):
     """計算英語使用比例"""
     english_chars = sum(1 for char in message if char.isascii() and char.isalpha())
     total_chars = sum(1 for char in message if char.isalpha())
     return english_chars / max(total_chars, 1)
 
-def log_interaction(user_id, user_name, message, is_group=False):
-    """記錄用戶互動到資料庫"""
+def calculate_course_specific_quality_score(message, current_week):
+    """根據課程特定目標計算品質分數"""
+    score = 1.0
+    message_lower = message.lower()
+    
+    # 基礎分數
+    if len(message) > 50:
+        score += 1.0
+    if len(message) > 100:
+        score += 0.5
+    
+    # AI基礎認知相關加分
+    ai_concepts = ["artificial intelligence", "machine learning", "algorithm", "neural network", 
+                  "deep learning", "automation", "智慧", "演算法", "自動化"]
+    if any(concept in message_lower for concept in ai_concepts):
+        score += 1.0
+    
+    # 實務應用相關加分
+    practical_terms = ["application", "practical", "implementation", "tool", "solution", 
+                      "應用", "實務", "工具", "解決", "實作"]
+    if any(term in message_lower for term in practical_terms):
+        score += 1.0
+    
+    # 倫理責任相關加分
+    ethics_terms = ["ethics", "responsibility", "privacy", "bias", "fairness", 
+                   "倫理", "責任", "隱私", "偏見", "公平"]
+    if any(term in message_lower for term in ethics_terms):
+        score += 1.0
+    
+    # 當週主題相關加分
+    if current_week in COURSE_SCHEDULE_18_WEEKS:
+        week_keywords = COURSE_SCHEDULE_18_WEEKS[current_week]["keywords"]
+        if any(keyword in message_lower for keyword in week_keywords):
+            score += 0.5
+    
+    # 英語使用加分（因為是英語授課）
+    english_ratio = calculate_english_ratio(message)
+    if english_ratio > 0.7:
+        score += 1.0
+    elif english_ratio > 0.5:
+        score += 0.5
+    
+    # 問號加分（鼓勵提問）
+    if '?' in message:
+        score += 0.5
+    
+    return min(score, 5.0)
+
+def contains_course_keywords(message, current_week):
+    """檢查是否包含課程特定關鍵詞"""
+    message_lower = message.lower()
+    
+    # 通用AI課程關鍵詞
+    course_keywords = [
+        'artificial intelligence', 'machine learning', 'ai', 'automation',
+        'generative ai', 'chatgpt', 'claude', 'application', 'practical',
+        'ethics', 'responsibility', 'privacy', 'tool', 'technology',
+        '人工智慧', '機器學習', '應用', '實務', '倫理', '工具'
+    ]
+    
+    # 當週特定關鍵詞
+    if current_week in COURSE_SCHEDULE_18_WEEKS:
+        week_keywords = COURSE_SCHEDULE_18_WEEKS[current_week]["keywords"]
+        course_keywords.extend(week_keywords)
+    
+    return any(keyword in message_lower for keyword in course_keywords)
+
+def log_course_interaction(user_id, user_name, message, is_group, current_week):
+    """記錄課程特定的互動數據"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -131,6 +335,9 @@ def log_interaction(user_id, user_name, message, is_group=False):
             VALUES (?, ?)
         ''', (user_id, user_name))
         
+        # 使用課程特定的品質評分
+        quality_score = calculate_course_specific_quality_score(message, current_week)
+        
         # 記錄互動
         cursor.execute('''
             INSERT INTO interactions 
@@ -140,18 +347,18 @@ def log_interaction(user_id, user_name, message, is_group=False):
             user_id, 
             classify_message_type(message),
             message,
-            calculate_quality_score(message),
-            1 if contains_academic_keywords(message) else 0,
+            quality_score,
+            1 if contains_course_keywords(message, current_week) else 0,
             calculate_english_ratio(message),
             'group_1' if is_group else None
         ))
         
         conn.commit()
         conn.close()
-        print(f"互動記錄成功: {user_name} - {message[:50]}")
+        print(f"課程互動記錄成功: {user_name} - Week {current_week} - {message[:50]}")
         
     except Exception as e:
-        print(f"記錄互動失敗: {e}")
+        print(f"記錄課程互動失敗: {e}")
 
 def log_ai_response(user_id, response):
     """記錄AI回應"""
@@ -171,39 +378,124 @@ def log_ai_response(user_id, response):
     except Exception as e:
         print(f"記錄AI回應失敗: {e}")
 
-def generate_contextual_response(user_message, user_name):
-    """生成情境式回應"""
-    greetings = [
-        f"Hi {user_name}! 我是您的EMI教學助手。我可以幫您解答學術問題，也可以用英語進行討論。有什麼我可以協助的嗎？",
-        f"Hello {user_name}! Welcome to our EMI learning environment. Feel free to ask me questions in English or Chinese!",
-        f"很高興見到您，{user_name}！我可以協助您進行英語學習和學術討論。請隨時提問！"
-    ]
+def generate_course_contextual_response(user_message, user_name, current_week):
+    """生成課程情境式回應"""
+    if current_week in COURSE_SCHEDULE_18_WEEKS:
+        week_info = COURSE_SCHEDULE_18_WEEKS[current_week]
+        topic = week_info["topic"]
+        chinese_topic = week_info["chinese"]
+        
+        greetings = [
+            f"Hi {user_name}! Welcome to our AI Practical Applications course! This week (Week {current_week}) we're exploring: {topic}. How can I assist you with today's learning?",
+            f"Hello {user_name}! Great to see you engaging with our course material. We're currently in Week {current_week} focusing on {topic}. What questions do you have?",
+            f"Hi {user_name}! 很高興見到您參與我們的AI實務應用課程。本週我們討論{chinese_topic}。有什麼我可以協助您的嗎？"
+        ]
+    else:
+        greetings = [
+            f"Hi {user_name}! Welcome to our AI Practical Applications course! I'm here to help you explore how AI can enhance your life and learning.",
+            f"Hello {user_name}! Ready to dive into the fascinating world of AI applications? Let's discover together!",
+            f"Hi {user_name}! 歡迎來到AI實務應用課程！讓我們一起探索AI如何改變生活與學習。"
+        ]
+    
     return random.choice(greetings)
 
-def generate_ai_response(user_message, user_name):
-    """生成AI回應"""
+def generate_course_specific_response(user_message, user_name, current_week):
+    """生成課程特定的AI回應"""
     user_message_lower = user_message.lower()
     
-    # 關鍵詞匹配回應
-    if any(word in user_message_lower for word in ['smart home', '智能家居', 'iot']):
-        return f"Hi {user_name}, a smart home leverages Industry 4.0 technologies like IoT (物聯網) to automate and customize aspects of home life, such as lighting and temperature control. Think of automated blinds adjusting to sunlight or appliances predicting your needs. Want to know more?"
+    # 根據當週主題生成回應
+    if current_week in COURSE_SCHEDULE_18_WEEKS:
+        week_info = COURSE_SCHEDULE_18_WEEKS[current_week]
+        topic = week_info["topic"]
+        focus = week_info["focus"]
+        
+        # 生成式AI相關（第2週）
+        if current_week == 2 and any(term in user_message_lower for term in ["chatgpt", "claude", "generative", "llm"]):
+            return f"Great question about generative AI, {user_name}! As we're exploring this week, tools like ChatGPT and Claude represent a major breakthrough in how we interact with AI. What specific aspects of these large language models do you find most interesting for practical applications?"
+        
+        # 學習工具相關（第4週）
+        elif current_week == 4 and any(term in user_message_lower for term in ["learning", "study", "education"]):
+            return f"Excellent point, {user_name}! This week we're focusing on AI applications in learning. These tools can personalize education, provide instant feedback, and adapt to individual learning styles. Have you tried any AI-powered learning assistants? What was your experience?"
+        
+        # 職場應用相關（第6週）
+        elif current_week == 6 and any(term in user_message_lower for term in ["work", "professional", "creative", "job"]):
+            return f"That's very relevant to our current topic, {user_name}! AI is transforming creative and professional fields by automating routine tasks and enhancing human capabilities. How do you think AI tools can augment rather than replace human creativity in your field of interest?"
+        
+        # 工業4.0相關（第13週）
+        elif current_week == 13 and any(term in user_message_lower for term in ["industry", "manufacturing", "smart", "4.0"]):
+            return f"Perfect timing for this discussion, {user_name}! Industry 4.0 represents the convergence of AI, IoT, and manufacturing. Smart factories use AI for predictive maintenance, quality control, and supply chain optimization. What aspects of smart manufacturing do you think will have the biggest impact?"
+        
+        # 日常生活應用相關（第15週）
+        elif current_week == 15 and any(term in user_message_lower for term in ["home", "daily", "life", "smart home"]):
+            return f"Great connection to our current focus, {user_name}! AI in daily life is becoming increasingly sophisticated - from voice assistants to smart thermostats that learn your preferences. What daily tasks do you think would benefit most from AI assistance?"
     
-    elif any(word in user_message_lower for word in ['industry 4.0', '工業4.0', 'ai', 'artificial intelligence']):
-        return f"That's a great question, {user_name}! Industry 4.0 leverages AI for smart manufacturing and automation to enable mass customization – think personalized products at scale. Consider how AI optimizes processes within the \"智慧製造\" (Smart Manufacturing) framework. Want to know more?"
+    # 通用回應
+    general_responses = [
+        f"That's an insightful observation, {user_name}! In the context of AI applications, it's important to consider both the benefits and potential challenges. How do you think we can ensure responsible AI use?",
+        f"Excellent point, {user_name}! This relates well to our course objectives of understanding AI's practical applications. Can you think of specific examples where this might be implemented?",
+        f"Great question, {user_name}! As we explore AI's role in life and learning, critical thinking like yours is essential. What are your thoughts on the ethical implications of this application?"
+    ]
     
-    elif any(word in user_message_lower for word in ['machine learning', '機器學習']):
-        return f"Excellent topic, {user_name}! Machine Learning is a subset of AI that enables systems to learn and improve from data without explicit programming. In EMI contexts, it's often discussed alongside concepts like neural networks (神經網路) and deep learning. What specific aspect interests you?"
+    return random.choice(general_responses)
+
+def generate_weekly_intelligent_question(user_name, current_week):
+    """根據當前週次生成智能提問"""
+    if current_week in WEEKLY_INTELLIGENT_QUESTIONS:
+        questions = WEEKLY_INTELLIGENT_QUESTIONS[current_week]
+        question = random.choice(questions)
+        week_info = COURSE_SCHEDULE_18_WEEKS.get(current_week, {})
+        topic = week_info.get("topic", f"Week {current_week}")
+        
+        return f"Hi {user_name}! 🤔 This week we're exploring: {topic}. {question} I'd love to hear your perspective and encourage you to share your thoughts with the class!"
     
-    elif any(word in user_message_lower for word in ['sustainability', '永續', 'environment']):
-        return f"Great question about sustainability, {user_name}! Environmental sustainability (環境永續) involves balancing economic growth with ecological protection. In EMI courses, we often explore how technology and innovation can support sustainable development goals. Which area would you like to explore further?"
+    # 通用智能提問
+    general_questions = [
+        "How has your understanding of AI applications evolved throughout this course?",
+        "What practical AI tool have you found most useful for your daily life or studies?",
+        "What ethical considerations do you think are most important when using AI?",
+        "How do you see AI changing your future career or field of study?"
+    ]
     
-    else:
-        responses = [
-            f"That's an interesting point, {user_name}! Can you elaborate on your thoughts? This kind of critical thinking is valuable in EMI learning environments.",
-            f"Good question, {user_name}! In academic contexts, it's important to consider multiple perspectives. What do you think are the key factors to consider here?",
-            f"Thanks for sharing, {user_name}! This is exactly the kind of engagement we encourage in EMI courses. How do you think this relates to our course concepts?"
-        ]
-        return random.choice(responses)
+    return f"Hi {user_name}! 💭 {random.choice(general_questions)} Feel free to share your insights!"
+
+def should_trigger_course_intelligent_question(user_id, current_week):
+    """判斷是否應該觸發課程智能提問"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 檢查用戶本週的互動次數
+        cursor.execute('''
+            SELECT COUNT(*) FROM interactions 
+            WHERE user_id = ? AND created_at >= datetime('now', '-7 days')
+        ''', (user_id,))
+        weekly_interactions = cursor.fetchone()[0]
+        
+        # 檢查用戶今日的互動次數
+        cursor.execute('''
+            SELECT COUNT(*) FROM interactions 
+            WHERE user_id = ? AND DATE(created_at) = DATE('now')
+        ''', (user_id,))
+        daily_interactions = cursor.fetchone()[0]
+        
+        # 檢查是否為專題分享週（需要更多互動）
+        is_project_week = current_week in [3, 5, 7, 9, 12, 14, 16]
+        
+        conn.close()
+        
+        # 觸發條件：週互動少於3次，且今日互動為1次（剛開始參與）
+        if weekly_interactions < 3 and daily_interactions == 1:
+            return True
+        
+        # 專題分享週需要更多互動
+        if is_project_week and weekly_interactions < 5:
+            return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"判斷課程智能提問錯誤: {e}")
+        return False
 
 def is_group_message(event):
     """檢查是否為群組訊息"""
@@ -247,14 +539,17 @@ def handle_message(event):
             if not user_message:
                 user_message = "Hi"
         
-        # 記錄互動數據
-        log_interaction(user_id, user_name, user_message, is_group)
+        # 獲取當前課程週次
+        current_week = get_current_course_week()
         
-        # 生成回應
+        # 記錄互動數據（使用課程特定評分）
+        log_course_interaction(user_id, user_name, user_message, is_group, current_week)
+        
+        # 生成課程特定回應
         if user_message.lower() in ['hi', 'hello', 'help', '幫助']:
-            response = generate_contextual_response(user_message, user_name)
+            response = generate_course_contextual_response(user_message, user_name, current_week)
         else:
-            response = generate_ai_response(user_message, user_name)
+            response = generate_course_specific_response(user_message, user_name, current_week)
         
         # 記錄AI回應
         log_ai_response(user_id, response)
@@ -265,13 +560,27 @@ def handle_message(event):
             TextSendMessage(text=response)
         )
         
+        # 檢查是否需要智能提問
+        if should_trigger_course_intelligent_question(user_id, current_week):
+            intelligent_question = generate_weekly_intelligent_question(user_name, current_week)
+            # 延遲發送智能提問
+            def delayed_course_question():
+                time.sleep(300)  # 5分鐘後發送
+                try:
+                    line_bot_api.push_message(user_id, TextSendMessage(text=intelligent_question))
+                except:
+                    pass
+            
+            threading.Thread(target=delayed_course_question, daemon=True).start()
+        
     except Exception as e:
-        print(f"處理訊息錯誤: {e}")
+        print(f"處理課程訊息錯誤: {e}")
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="抱歉，處理訊息時發生錯誤。請稍後再試。")
         )
 
+# 研究數據分析函數
 def get_research_stats():
     """獲取研究統計數據"""
     try:
@@ -336,64 +645,106 @@ def get_research_stats():
             'avg_interactions_per_user': 0
         }
 
-def get_student_engagement():
-    """獲取學生參與度排行"""
+def get_course_specific_analytics():
+    """獲取課程特定的分析數據"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
-            SELECT 
-                u.user_name,
-                COUNT(i.id) as message_count,
-                AVG(i.quality_score) as avg_quality,
-                CASE 
-                    WHEN COUNT(i.id) >= 10 THEN '高度參與'
-                    WHEN COUNT(i.id) >= 5 THEN '中度參與'
-                    ELSE '低度參與'
-                END as engagement_level
-            FROM users u
-            LEFT JOIN interactions i ON u.user_id = i.user_id
-            GROUP BY u.user_id, u.user_name
-            ORDER BY message_count DESC
-            LIMIT 10
-        ''')
+        current_week = get_current_course_week()
         
-        results = cursor.fetchall()
+        # 當週主題參與度
+        if current_week in COURSE_SCHEDULE_18_WEEKS:
+            week_keywords = COURSE_SCHEDULE_18_WEEKS[current_week]["keywords"]
+            keyword_conditions = " OR ".join([f"LOWER(content) LIKE '%{keyword}%'" for keyword in week_keywords])
+            
+            cursor.execute(f'''
+                SELECT COUNT(*) FROM interactions 
+                WHERE ({keyword_conditions})
+                AND DATE(created_at) >= DATE('now', '-7 days')
+            ''')
+            weekly_topic_engagement = cursor.fetchone()[0]
+        else:
+            weekly_topic_engagement = 0
+        
+        # 三大課程目標相關討論統計
+        # 1. AI基礎認知
+        cursor.execute('''
+            SELECT COUNT(*) FROM interactions 
+            WHERE (LOWER(content) LIKE '%artificial intelligence%' 
+                OR LOWER(content) LIKE '%machine learning%'
+                OR LOWER(content) LIKE '%algorithm%'
+                OR LOWER(content) LIKE '%智慧%')
+        ''')
+        ai_fundamentals_discussions = cursor.fetchone()[0]
+        
+        # 2. 實務應用
+        cursor.execute('''
+            SELECT COUNT(*) FROM interactions 
+            WHERE (LOWER(content) LIKE '%application%' 
+                OR LOWER(content) LIKE '%practical%'
+                OR LOWER(content) LIKE '%tool%'
+                OR LOWER(content) LIKE '%應用%'
+                OR LOWER(content) LIKE '%實務%')
+        ''')
+        practical_applications_discussions = cursor.fetchone()[0]
+        
+        # 3. 倫理與責任
+        cursor.execute('''
+            SELECT COUNT(*) FROM interactions 
+            WHERE (LOWER(content) LIKE '%ethics%' 
+                OR LOWER(content) LIKE '%responsibility%'
+                OR LOWER(content) LIKE '%privacy%'
+                OR LOWER(content) LIKE '%倫理%'
+                OR LOWER(content) LIKE '%責任%')
+        ''')
+        ethics_discussions = cursor.fetchone()[0]
+        
+        # 英語授課成效
+        cursor.execute('''
+            SELECT AVG(english_ratio) FROM interactions 
+            WHERE english_ratio > 0
+        ''')
+        avg_english_usage = cursor.fetchone()[0] or 0
+        
         conn.close()
         
-        return [dict(row) for row in results]
+        return {
+            'current_week': current_week,
+            'current_topic': COURSE_SCHEDULE_18_WEEKS.get(current_week, {}).get('topic', 'N/A'),
+            'weekly_topic_engagement': weekly_topic_engagement,
+            'ai_fundamentals_discussions': ai_fundamentals_discussions,
+            'practical_applications_discussions': practical_applications_discussions,
+            'ethics_discussions': ethics_discussions,
+            'avg_english_usage': round(avg_english_usage, 3),
+            'course_objectives_coverage': {
+                'AI基礎認知': ai_fundamentals_discussions,
+                '實務應用': practical_applications_discussions,
+                '倫理責任': ethics_discussions
+            }
+        }
         
     except Exception as e:
-        print(f"獲取學生參與度錯誤: {e}")
-        return []
+        print(f"獲取課程特定分析錯誤: {e}")
+        return {}
 
-def get_group_activity():
-    """獲取小組活躍度排行"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+def generate_course_progress_html(current_week):
+    """生成課程進度HTML"""
+    html = ""
+    for week in range(1, 19):
+        status = "current" if week == current_week else ("completed" if week < current_week else "upcoming")
+        color = "#28a745" if status == "completed" else ("#007bff" if status == "current" else "#6c757d")
         
-        cursor.execute('''
-            SELECT 
-                COALESCE(group_id, '個人互動') as group_name,
-                COUNT(id) as activity_count,
-                COUNT(DISTINCT user_id) as participant_count,
-                AVG(quality_score) as avg_quality
-            FROM interactions
-            GROUP BY group_id
-            ORDER BY activity_count DESC
-        ''')
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        return [dict(row) for row in results]
-        
-    except Exception as e:
-        print(f"獲取小組活動錯誤: {e}")
-        return []
+        html += f'''
+        <div style="background: {color}; color: white; padding: 10px; border-radius: 5px; font-size: 0.8em;">
+            Week {week}
+            <br>
+            {COURSE_SCHEDULE_18_WEEKS.get(week, {}).get('focus', '')}
+        </div>
+        '''
+    return html
 
+# 網頁路由
 @app.route("/", methods=['GET'])
 def enhanced_home():
     """首頁"""
@@ -403,7 +754,7 @@ def enhanced_home():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>EMI教學研究數據儀表板</title>
+        <title>AI實務應用課程儀表板</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
@@ -483,34 +834,145 @@ def enhanced_home():
     <body>
         <div class="container">
             <div class="header">
-                <h1>📊 EMI教學研究數據儀表板</h1>
-                <p>生成式AI輔助的雙語教學創新研究</p>
+                <h1>📚 AI在生活與學習上的實務應用</h1>
+                <p>Practical Applications of AI in Life and Learning</p>
+                <p>授課教師：曾郁堯 | 通識教育中心</p>
                 <span class="status">🟢 系統運行中</span>
             </div>
             
             <div class="card-grid">
                 <div class="card">
-                    <h3>🎯 研究目標</h3>
-                    <p>透過生成式AI技術提升EMI課程學生參與度與跨文化能力，建立創新的雙語教學模式。</p>
-                    <a href="/research_dashboard" class="btn">查看研究儀表板</a>
+                    <h3>🎯 課程目標追蹤</h3>
+                    <p>AI基礎認知 + 實務應用 + 倫理責任</p>
+                    <p>透過18週系統性學習，培養AI應用與批判思考能力</p>
+                    <a href="/course_dashboard" class="btn">查看課程儀表板</a>
                 </div>
                 
                 <div class="card">
-                    <h3>📈 數據分析</h3>
-                    <p>即時追蹤學生互動頻率、討論品質、英語使用比例等關鍵指標，支援教學決策。</p>
+                    <h3>📊 學習成效分析</h3>
+                    <p>即時追蹤學生參與度、討論品質、英語使用比例</p>
+                    <p>支援EMI雙語教學與個人化學習回饋</p>
+                    <a href="/research_dashboard" class="btn">查看研究數據</a>
+                </div>
+                
+                <div class="card">
+                    <h3>🤖 AI智能助手</h3>
+                    <p>LINE Bot整合18週課程內容，provide 24/7學習支援</p>
+                    <p>根據課程進度主動提問，促進深度學習</p>
                     <a href="/weekly_report" class="btn">查看週報告</a>
                 </div>
                 
                 <div class="card">
-                    <h3>🤖 AI教學助手</h3>
-                    <p>LINE Bot整合智能回應系統，提供24/7學習支援，促進學生主動參與討論。</p>
+                    <h3>📈 教學研究支援</h3>
+                    <p>完整的學習行為數據記錄與分析</p>
+                    <p>支援教學實踐研究與成果發表</p>
                     <a href="/export_research_data" class="btn">匯出研究數據</a>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+
+@app.route("/course_dashboard", methods=['GET'])
+def course_dashboard():
+    """課程特定儀表板"""
+    course_analytics = get_course_specific_analytics()
+    basic_stats = get_research_stats()
+    
+    return f'''
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <title>AI實務應用課程儀表板</title>
+        <style>
+            body {{ font-family: 'Microsoft JhengHei', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
+            .container {{ max-width: 1400px; margin: 0 auto; }}
+            .header {{ text-align: center; background: white; padding: 30px; border-radius: 10px; margin-bottom: 20px; }}
+            .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }}
+            .card {{ background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+            .metric {{ text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px; margin: 10px 0; }}
+            .metric-value {{ font-size: 2em; font-weight: bold; color: #007bff; }}
+            .progress-bar {{ width: 100%; height: 10px; background: #e9ecef; border-radius: 5px; margin: 10px 0; }}
+            .progress-fill {{ height: 100%; background: linear-gradient(90deg, #007bff, #28a745); border-radius: 5px; }}
+            .objective {{ background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0; }}
+            .week-info {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📚 AI在生活與學習上的實務應用 - 課程儀表板</h1>
+                <p>Practical Applications of AI in Life and Learning</p>
+                <p>授課教師：曾郁堯 | 更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            </div>
+            
+            <div class="grid">
+                <div class="card">
+                    <div class="week-info">
+                        <h2>📅 當前課程進度</h2>
+                        <p><strong>第 {course_analytics.get('current_week', 'N/A')} 週</strong></p>
+                        <p>{course_analytics.get('current_topic', 'N/A')}</p>
+                        <p>本週主題參與：{course_analytics.get('weekly_topic_engagement', 0)} 次討論</p>
+                    </div>
                 </div>
                 
                 <div class="card">
-                    <h3>📊 教學成效</h3>
-                    <p>系統性記錄學習行為數據，支援教學實踐研究與成果發表。</p>
-                    <a href="/health" class="btn">系統健康檢查</a>
+                    <h3>🎯 三大課程目標達成情況</h3>
+                    <div class="objective">
+                        <h4>AI基礎認知</h4>
+                        <p>{course_analytics.get('ai_fundamentals_discussions', 0)} 次相關討論</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: {min(course_analytics.get('ai_fundamentals_discussions', 0) * 10, 100)}%"></div>
+                        </div>
+                    </div>
+                    <div class="objective">
+                        <h4>實務應用</h4>
+                        <p>{course_analytics.get('practical_applications_discussions', 0)} 次相關討論</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: {min(course_analytics.get('practical_applications_discussions', 0) * 10, 100)}%"></div>
+                        </div>
+                    </div>
+                    <div class="objective">
+                        <h4>倫理與責任</h4>
+                        <p>{course_analytics.get('ethics_discussions', 0)} 次相關討論</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: {min(course_analytics.get('ethics_discussions', 0) * 10, 100)}%"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>🌐 英語授課成效</h3>
+                    <div class="metric">
+                        <div class="metric-value">{course_analytics.get('avg_english_usage', 0):.1%}</div>
+                        <p>平均英語使用比例</p>
+                    </div>
+                    <p>{"✅ 英語使用良好" if course_analytics.get('avg_english_usage', 0) > 0.6 else "⚠️ 建議增加英語互動"}</p>
+                </div>
+                
+                <div class="card">
+                    <h3>📊 基礎統計數據</h3>
+                    <div class="metric">
+                        <div class="metric-value">{basic_stats['total_interactions']}</div>
+                        <p>總互動次數</p>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">{basic_stats['active_students']}</div>
+                        <p>活躍學生數</p>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">{basic_stats['avg_quality']}</div>
+                        <p>平均討論品質</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card" style="margin-top: 20px;">
+                <h3>📝 18週課程規劃進度</h3>
+                <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; text-align: center;">
+                    {generate_course_progress_html(course_analytics.get('current_week', 1))}
                 </div>
             </div>
         </div>
@@ -522,6 +984,8 @@ def enhanced_home():
 def research_dashboard():
     """研究數據儀表板"""
     stats = get_research_stats()
+    current_week = get_current_course_week()
+    
     return f'''
     <!DOCTYPE html>
     <html lang="zh-TW">
@@ -542,7 +1006,7 @@ def research_dashboard():
         <div class="container">
             <div class="header">
                 <h1>📊 EMI教學研究數據儀表板</h1>
-                <p>更新時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p>更新時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 當前週次: 第{current_week}週</p>
             </div>
             
             <div class="metrics">
@@ -580,12 +1044,14 @@ def research_dashboard():
 def weekly_report():
     """週報告頁面"""
     stats = get_research_stats()
+    current_week = get_current_course_week()
+    
     return f'''
     <!DOCTYPE html>
     <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
-        <title>EMI週報告</title>
+        <title>AI課程週報告</title>
         <style>
             body {{ font-family: 'Microsoft JhengHei', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
             .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
@@ -598,8 +1064,8 @@ def weekly_report():
     <body>
         <div class="container">
             <div class="header">
-                <h1>📊 EMI教學研究週報告</h1>
-                <p>第10週 • {datetime.now().strftime('%Y年%m月%d日')}</p>
+                <h1>📊 AI實務應用課程週報告</h1>
+                <p>第{current_week}週 • {datetime.now().strftime('%Y年%m月%d日')}</p>
             </div>
             
             <div class="section">
@@ -625,7 +1091,7 @@ def weekly_report():
             </div>
             
             <div class="section">
-                <h2>🎯 研究目標達成情況</h2>
+                <h2>🎯 課程目標達成情況</h2>
                 <p><strong>週使用率:</strong> {stats['weekly_usage_rate']}% {'✅ 已達標' if stats['weekly_usage_rate'] >= 70 else '❌ 未達標 (目標≥70%)'}</p>
                 <p><strong>平均發言次數:</strong> {stats['avg_interactions_per_user']}次/週 {'✅ 已達標' if stats['avg_interactions_per_user'] >= 5 else '❌ 未達標 (目標≥5次)'}</p>
                 <p><strong>討論品質:</strong> {stats['avg_quality']}/5.0 {'✅ 良好' if stats['avg_quality'] >= 3.0 else '⚠️ 待改善'}</p>
@@ -667,7 +1133,7 @@ def export_research_data():
         
         return csv_content, 200, {
             'Content-Type': 'text/csv; charset=utf-8',
-            'Content-Disposition': f'attachment; filename="emi_research_data_{datetime.now().strftime("%Y%m%d")}.csv"'
+            'Content-Disposition': f'attachment; filename="ai_course_data_{datetime.now().strftime("%Y%m%d")}.csv"'
         }
         
     except Exception as e:
@@ -687,21 +1153,35 @@ def health_check():
     """健康檢查"""
     return "OK"
 
-# 初始化資料庫
+# 定時任務
+def setup_course_scheduled_tasks():
+    """設定課程定時任務"""
+    def run_scheduler():
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+    
+    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+    scheduler_thread.start()
+
+# 初始化
 init_database()
+setup_course_scheduled_tasks()
 
 # Gunicorn 應用物件
 application = app
 
 if __name__ == "__main__":
-    print("🚀 啟動EMI教學研究系統...")
-    print("📊 研究儀表板：/research_dashboard")
-    print("📈 週報告：/weekly_report") 
-    print("📤 數據匯出：/export_research_data")
-    print("🔍 路由測試：/test_routes")
+    current_week = get_current_course_week()
+    print("📚 AI在生活與學習上的實務應用 - 課程系統啟動")
+    print(f"🗓️ 當前週次：第 {current_week} 週")
+    print(f"📖 本週主題：{COURSE_SCHEDULE_18_WEEKS.get(current_week, {}).get('topic', 'N/A')}")
+    print("🎯 課程目標：AI基礎認知 + 實務應用 + 倫理責任")
+    print("🌐 授課語言：英語 (EMI)")
+    print("📊 功能：智能問答 + 學習追蹤 + 成效分析")
     
     # 顯示註冊的路由
-    print("\n📝 已註冊的路由：")
+    print("\n📝 系統路由：")
     for rule in app.url_map.iter_rules():
         print(f"  {rule.rule} -> {rule.endpoint}")
     
