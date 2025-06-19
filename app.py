@@ -1,7 +1,4 @@
-from flask import Flask, request, abort, jsonify
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from flask import Flask, request, abort, jsonify, Response
 import os
 import sqlite3
 import json
@@ -11,9 +8,29 @@ import re
 
 app = Flask(__name__)
 
-# LINE Bot 設定
-line_bot_api = LineBotApi(os.environ.get('CHANNEL_ACCESS_TOKEN'))
-handler = WebhookHandler(os.environ.get('CHANNEL_SECRET'))
+# LINE Bot 設定 - 安全檢查
+CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
+CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
+
+# 只有在環境變數存在時才初始化 LINE Bot
+line_bot_api = None
+handler = None
+
+if CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET:
+    try:
+        from linebot import LineBotApi, WebhookHandler
+        from linebot.exceptions import InvalidSignatureError
+        from linebot.models import MessageEvent, TextMessage, TextSendMessage
+        
+        line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+        handler = WebhookHandler(CHANNEL_SECRET)
+        print("✅ LINE Bot 已初始化")
+    except Exception as e:
+        print(f"⚠️ LINE Bot 初始化失敗: {e}")
+        line_bot_api = None
+        handler = None
+else:
+    print("⚠️ LINE Bot 環境變數未設定，僅啟用網頁功能")
 
 # 18週課程設定
 COURSE_SCHEDULE_18_WEEKS = {
@@ -60,36 +77,92 @@ def get_db_connection():
 
 def init_db():
     """初始化資料庫"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id TEXT PRIMARY KEY,
-            user_name TEXT NOT NULL,
-            first_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS interactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            user_name TEXT,
-            content TEXT,
-            ai_response TEXT,
-            message_type TEXT,
-            quality_score REAL,
-            english_ratio REAL,
-            contains_keywords INTEGER,
-            group_id TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                user_name TEXT NOT NULL,
+                first_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS interactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                user_name TEXT,
+                content TEXT,
+                ai_response TEXT,
+                message_type TEXT,
+                quality_score REAL,
+                english_ratio REAL,
+                contains_keywords INTEGER,
+                group_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ 資料庫初始化完成")
+        
+        # 創建測試數據
+        create_demo_data()
+        
+    except Exception as e:
+        print(f"❌ 資料庫初始化失敗: {e}")
+
+def create_demo_data():
+    """創建示範數據"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 檢查是否已有數據
+        cursor.execute('SELECT COUNT(*) FROM users')
+        if cursor.fetchone()[0] > 0:
+            conn.close()
+            return
+        
+        # 創建示範學生
+        demo_students = [
+            ('student001', 'York Chen'),
+            ('student002', 'Alice Wang'),
+            ('student003', 'Bob Lin'),
+            ('student004', 'Catherine Liu'),
+            ('student005', 'David Chang')
+        ]
+        
+        for user_id, user_name in demo_students:
+            cursor.execute('INSERT INTO users (user_id, user_name) VALUES (?, ?)', (user_id, user_name))
+        
+        # 創建示範互動數據
+        demo_interactions = [
+            ('student001', 'York Chen', 'What is artificial intelligence?', 'AI回應內容...', 'question', 4.2, 0.85, 1, None),
+            ('student001', 'York Chen', '我覺得AI在教育很有用', 'AI回應內容...', 'discussion', 3.8, 0.3, 1, 'group'),
+            ('student002', 'Alice Wang', 'How does machine learning work?', 'AI回應內容...', 'question', 4.5, 0.9, 1, None),
+            ('student003', 'Bob Lin', 'AI ethics is important', 'AI回應內容...', 'discussion', 3.5, 0.7, 1, 'group'),
+            ('student004', 'Catherine Liu', '生成式AI的應用', 'AI回應內容...', 'response', 3.2, 0.2, 1, None),
+        ]
+        
+        for interaction in demo_interactions:
+            cursor.execute('''
+                INSERT INTO interactions 
+                (user_id, user_name, content, ai_response, message_type, quality_score, 
+                 english_ratio, contains_keywords, group_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', interaction)
+        
+        conn.commit()
+        conn.close()
+        print("✅ 示範數據創建完成")
+        
+    except Exception as e:
+        print(f"❌ 示範數據創建失敗: {e}")
 
 def is_group_message(event):
     """檢查是否為群組訊息"""
@@ -193,58 +266,149 @@ def generate_ai_response(message, user_name):
     import random
     return random.choice(responses)
 
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
-    
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    
-    return 'OK'
-
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    try:
-        user_message = event.message.text
-        user_id = event.source.user_id
+# LINE Bot 路由 - 只有在LINE Bot可用時才啟用
+if line_bot_api and handler:
+    @app.route("/callback", methods=['POST'])
+    def callback():
+        signature = request.headers['X-Line-Signature']
+        body = request.get_data(as_text=True)
         
-        # 獲取用戶資料
         try:
-            profile = line_bot_api.get_profile(user_id)
-            user_name = profile.display_name
-        except:
-            user_name = f"User{user_id[:8]}"
+            handler.handle(body, signature)
+        except InvalidSignatureError:
+            abort(400)
         
-        # 處理群組訊息
-        is_group = is_group_message(event)
-        if is_group:
-            if not user_message.strip().startswith('@AI'):
-                return
-            user_message = user_message.replace('@AI', '').strip()
-            if not user_message:
-                user_message = "Hi"
+        return 'OK'
+
+    @handler.add(MessageEvent, message=TextMessage)
+    def handle_message(event):
+        try:
+            user_message = event.message.text
+            user_id = event.source.user_id
+            
+            # 獲取用戶資料
+            try:
+                profile = line_bot_api.get_profile(user_id)
+                user_name = profile.display_name
+            except:
+                user_name = f"User{user_id[:8]}"
+            
+            # 處理群組訊息
+            is_group = is_group_message(event)
+            if is_group:
+                if not user_message.strip().startswith('@AI'):
+                    return
+                user_message = user_message.replace('@AI', '').strip()
+                if not user_message:
+                    user_message = "Hi"
+            
+            # 生成回應
+            ai_response = generate_ai_response(user_message, user_name)
+            
+            # 記錄互動
+            log_interaction(user_id, user_name, user_message, ai_response, is_group)
+            
+            # 發送回應
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=ai_response)
+            )
+            
+        except Exception as e:
+            print(f"處理訊息錯誤: {e}")
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="抱歉，處理訊息時發生錯誤。")
+            )
+else:
+    @app.route("/callback", methods=['POST'])
+    def callback():
+        return jsonify({"error": "LINE Bot not configured", "message": "請設定 CHANNEL_ACCESS_TOKEN 和 CHANNEL_SECRET 環境變數"})
+
+# 模擬 LINE Bot 互動的網頁介面
+@app.route("/simulate_interaction", methods=['GET', 'POST'])
+def simulate_interaction():
+    """模擬LINE Bot互動的網頁介面"""
+    if request.method == 'POST':
+        user_name = request.form.get('user_name', 'Demo User')
+        user_id = request.form.get('user_id', 'demo_user')
+        message = request.form.get('message', '')
+        is_group = request.form.get('is_group') == 'on'
         
-        # 生成回應
-        ai_response = generate_ai_response(user_message, user_name)
-        
-        # 記錄互動
-        log_interaction(user_id, user_name, user_message, ai_response, is_group)
-        
-        # 發送回應
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=ai_response)
-        )
-        
-    except Exception as e:
-        print(f"處理訊息錯誤: {e}")
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="抱歉，處理訊息時發生錯誤。")
-        )
+        if message:
+            ai_response = generate_ai_response(message, user_name)
+            log_interaction(user_id, user_name, message, ai_response, is_group)
+            
+            return f'''
+            <div style="font-family: Microsoft JhengHei; margin: 20px; padding: 20px; background: #f0f8ff; border-radius: 10px;">
+                <h3>✅ 互動已記錄</h3>
+                <p><strong>學生:</strong> {user_name}</p>
+                <p><strong>訊息:</strong> {message}</p>
+                <p><strong>AI回應:</strong> {ai_response}</p>
+                <p><strong>群組互動:</strong> {'是' if is_group else '否'}</p>
+                <a href="/simulate_interaction" style="color: #007bff;">繼續測試</a> |
+                <a href="/research_dashboard" style="color: #007bff;">查看數據</a>
+            </div>
+            '''
+    
+    return '''
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <title>LINE Bot 互動模擬器</title>
+        <style>
+            body { font-family: Microsoft JhengHei; margin: 40px; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+            .form-group { margin: 15px 0; }
+            label { display: block; margin-bottom: 5px; font-weight: bold; }
+            input, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+            button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; }
+            .note { background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📱 LINE Bot 互動模擬器</h1>
+            
+            <div class="note">
+                <strong>💡 說明:</strong> 由於LINE Bot環境變數未設定，您可以使用此介面模擬學生互動，測試數據記錄功能。
+            </div>
+            
+            <form method="POST">
+                <div class="form-group">
+                    <label>學生姓名:</label>
+                    <input type="text" name="user_name" value="York Chen" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>學生ID:</label>
+                    <input type="text" name="user_id" value="student001" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>訊息內容:</label>
+                    <textarea name="message" rows="4" placeholder="例如: What is artificial intelligence?" required></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="is_group"> 群組互動 (模擬@AI呼叫)
+                    </label>
+                </div>
+                
+                <button type="submit">🚀 模擬互動</button>
+            </form>
+            
+            <div style="margin-top: 30px; text-align: center;">
+                <a href="/" style="color: #007bff; margin: 0 10px;">🏠 回到首頁</a>
+                <a href="/research_dashboard" style="color: #007bff; margin: 0 10px;">📊 查看數據</a>
+                <a href="/student_list" style="color: #007bff; margin: 0 10px;">👥 學生列表</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
 
 # 個人分析功能
 def get_individual_student_analysis(user_id):
@@ -285,7 +449,7 @@ def analyze_individual_performance(interactions, user_name, user_id):
     
     # 參與度分析
     active_days = len(set(dates))
-    study_period = (max(dates) - min(dates)).days + 1
+    study_period = (max(dates) - min(dates)).days + 1 if len(dates) > 1 else 1
     
     # 品質分析
     qualities = [row[3] for row in interactions if row[3] > 0]
@@ -329,7 +493,7 @@ def analyze_individual_performance(interactions, user_name, user_id):
         },
         'questioning': {
             'total_questions': len(questions),
-            'question_ratio': len(questions) / total_interactions,
+            'question_ratio': len(questions) / total_interactions if total_interactions > 0 else 0,
             'questioning_pattern': get_questioning_pattern(len(questions), total_interactions),
             'question_topics': analyze_question_topics(questions)
         },
@@ -490,19 +654,23 @@ def generate_assessment(interactions, quality, english, questions):
 @app.route("/")
 def home():
     """首頁"""
-    return '''
+    line_bot_status = "✅ 已配置" if line_bot_api else "⚠️ 未配置"
+    
+    return f'''
     <!DOCTYPE html>
     <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
-        <title>AI實務應用課程</title>
+        <title>AI實務應用課程分析系統</title>
         <style>
-            body { font-family: Microsoft JhengHei; margin: 40px; background: #f5f5f5; }
-            .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
-            .header { text-align: center; margin-bottom: 40px; color: #333; }
-            .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-            .card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            .btn { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+            body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
+            .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+            .header {{ text-align: center; margin-bottom: 40px; color: #333; }}
+            .status {{ background: #28a745; color: white; padding: 8px 16px; border-radius: 20px; margin: 10px; }}
+            .warning {{ background: #ffc107; color: #333; padding: 8px 16px; border-radius: 20px; margin: 10px; }}
+            .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }}
+            .card {{ background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+            .btn {{ display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px; }}
         </style>
     </head>
     <body>
@@ -510,28 +678,112 @@ def home():
             <div class="header">
                 <h1>📚 AI在生活與學習上的實務應用</h1>
                 <p>通識教育中心 | 授課教師：曾郁堯</p>
+                <span class="{'status' if line_bot_api else 'warning'}">LINE Bot狀態: {line_bot_status}</span>
             </div>
+            
+            {'''<div style="background: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <h3>💡 系統說明</h3>
+                <p>LINE Bot環境變數未設定，目前僅提供網頁分析功能。</p>
+                <p>您可以使用「互動模擬器」測試系統功能，或查看現有的示範數據。</p>
+            </div>''' if not line_bot_api else ''}
+            
             <div class="cards">
                 <div class="card">
                     <h3>👥 個人學習分析</h3>
-                    <p>查看每位學生的詳細學習報告</p>
+                    <p>查看每位學生的詳細學習報告和進步軌跡</p>
                     <a href="/student_list" class="btn">學生列表</a>
                 </div>
                 <div class="card">
                     <h3>📊 班級整體分析</h3>
-                    <p>全班學習狀況和教學成效</p>
+                    <p>全班學習狀況統計和教學成效評估</p>
                     <a href="/class_analysis" class="btn">班級分析</a>
                 </div>
                 <div class="card">
-                    <h3>📈 研究數據</h3>
-                    <p>EMI教學實踐研究數據</p>
+                    <h3>📈 研究數據儀表板</h3>
+                    <p>EMI教學實踐研究數據追蹤</p>
                     <a href="/research_dashboard" class="btn">研究儀表板</a>
                 </div>
                 <div class="card">
+                    <h3>📱 互動模擬器</h3>
+                    <p>模擬LINE Bot互動，測試數據記錄功能</p>
+                    <a href="/simulate_interaction" class="btn">開始模擬</a>
+                </div>
+                <div class="card">
                     <h3>📄 數據匯出</h3>
-                    <p>匯出完整的學習數據</p>
+                    <p>匯出完整的學習數據，支援研究分析</p>
                     <a href="/export_research_data" class="btn">匯出數據</a>
                 </div>
+                <div class="card">
+                    <h3>⚙️ 系統設定</h3>
+                    <p>LINE Bot配置說明和技術支援</p>
+                    <a href="/setup_guide" class="btn">設定指南</a>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+
+@app.route("/setup_guide")
+def setup_guide():
+    """設定指南"""
+    return '''
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <title>LINE Bot 設定指南</title>
+        <style>
+            body { font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+            .step { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #007bff; }
+            code { background: #f1f1f1; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔧 LINE Bot 設定指南</h1>
+            
+            <div class="step">
+                <h3>步驟 1: 建立 LINE Bot</h3>
+                <p>1. 前往 <a href="https://developers.line.biz/">LINE Developers</a></p>
+                <p>2. 建立新的 Channel（Messaging API）</p>
+                <p>3. 取得 Channel Access Token 和 Channel Secret</p>
+            </div>
+            
+            <div class="step">
+                <h3>步驟 2: 設定 Railway 環境變數</h3>
+                <p>在 Railway 專案的 Variables 頁面設定：</p>
+                <p><code>CHANNEL_ACCESS_TOKEN</code> = 您的 Channel Access Token</p>
+                <p><code>CHANNEL_SECRET</code> = 您的 Channel Secret</p>
+            </div>
+            
+            <div class="step">
+                <h3>步驟 3: 設定 Webhook</h3>
+                <p>在 LINE Bot 設定中設定 Webhook URL：</p>
+                <p><code>https://your-railway-domain.up.railway.app/callback</code></p>
+            </div>
+            
+            <div class="step">
+                <h3>步驟 4: 測試功能</h3>
+                <p>1. 加入您的 LINE Bot 為好友</p>
+                <p>2. 建立群組並邀請 Bot</p>
+                <p>3. 在群組中使用 <code>@AI 您的問題</code> 測試</p>
+                <p>4. 私訊 Bot 測試個人互動</p>
+            </div>
+            
+            <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin-top: 30px;">
+                <h3>✅ 設定完成後的功能</h3>
+                <ul>
+                    <li>群組討論：學生使用 @AI 呼叫機器人</li>
+                    <li>個人諮詢：學生私訊機器人</li>
+                    <li>自動數據記錄：所有互動自動分析和儲存</li>
+                    <li>教學分析：即時查看學習成效</li>
+                </ul>
+            </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="/" style="color: #007bff;">← 回到首頁</a>
             </div>
         </div>
     </body>
@@ -547,7 +799,7 @@ def student_list():
         
         cursor.execute('''
             SELECT u.user_id, u.user_name, COUNT(i.id) as total_interactions,
-                   AVG(i.quality_score) as avg_quality
+                   AVG(i.quality_score) as avg_quality, MAX(i.created_at) as last_activity
             FROM users u
             LEFT JOIN interactions i ON u.user_id = i.user_id
             GROUP BY u.user_id, u.user_name
@@ -562,39 +814,94 @@ def student_list():
         <html lang="zh-TW">
         <head>
             <meta charset="UTF-8">
-            <title>學生列表</title>
+            <title>學生個人分析列表</title>
             <style>
-                body { font-family: Microsoft JhengHei; margin: 40px; }
+                body { font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }
+                .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+                .header { text-align: center; margin-bottom: 30px; color: #333; }
                 table { width: 100%; border-collapse: collapse; }
                 th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
-                th { background: #f8f9fa; }
+                th { background: #f8f9fa; font-weight: bold; }
+                tr:hover { background: #f8f9fa; }
                 .btn { padding: 6px 12px; background: #007bff; color: white; text-decoration: none; border-radius: 3px; }
+                .status { display: inline-block; padding: 4px 8px; border-radius: 12px; font-size: 0.8em; color: white; }
+                .nav-links { text-align: center; margin-bottom: 20px; }
+                .nav-links a { display: inline-block; margin: 0 10px; padding: 8px 16px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; }
             </style>
         </head>
         <body>
-            <h1>👥 學生個人分析列表</h1>
-            <table>
-                <tr>
-                    <th>學生姓名</th>
-                    <th>互動次數</th>
-                    <th>平均品質</th>
-                    <th>操作</th>
-                </tr>
+            <div class="container">
+                <div class="header">
+                    <h1>👥 學生個人分析系統</h1>
+                    <p>AI在生活與學習上的實務應用課程</p>
+                </div>
+                
+                <div class="nav-links">
+                    <a href="/">🏠 首頁</a>
+                    <a href="/class_analysis">📊 班級分析</a>
+                    <a href="/research_dashboard">📈 研究數據</a>
+                    <a href="/simulate_interaction">📱 互動模擬</a>
+                </div>
+                
+                <h2>學生個人分析列表</h2>
+                <p>點擊「詳細分析」查看個別學生的完整學習報告</p>
+                
+                <table>
+                    <tr>
+                        <th>學生姓名</th>
+                        <th>互動次數</th>
+                        <th>平均品質</th>
+                        <th>最後活動</th>
+                        <th>狀態</th>
+                        <th>操作</th>
+                    </tr>
         '''
         
         for student in students:
-            user_id, user_name, interactions, quality = student
+            user_id, user_name, interactions, quality, last_activity = student
+            interactions = interactions or 0
+            quality = quality or 0
+            
+            # 判斷狀態
+            if interactions >= 10:
+                status = "活躍"
+                status_color = "#28a745"
+            elif interactions >= 5:
+                status = "正常"
+                status_color = "#ffc107"
+            elif interactions >= 1:
+                status = "較少"
+                status_color = "#fd7e14"
+            else:
+                status = "無互動"
+                status_color = "#dc3545"
+            
+            # 格式化時間
+            if last_activity:
+                try:
+                    last_date = datetime.fromisoformat(last_activity).strftime('%m/%d')
+                except:
+                    last_date = "未知"
+            else:
+                last_date = "無記錄"
+            
             html += f'''
                 <tr>
-                    <td>{user_name}</td>
-                    <td>{interactions or 0}</td>
-                    <td>{quality:.2f if quality else 0}</td>
+                    <td><strong>{user_name}</strong></td>
+                    <td>{interactions}</td>
+                    <td>{quality:.2f}</td>
+                    <td>{last_date}</td>
+                    <td><span class="status" style="background: {status_color};">{status}</span></td>
                     <td><a href="/student_analysis/{user_id}" class="btn">詳細分析</a></td>
                 </tr>
             '''
         
+        if not students:
+            html += '<tr><td colspan="6" style="text-align: center;">暫無學生數據</td></tr>'
+        
         html += '''
-            </table>
+                </table>
+            </div>
         </body>
         </html>
         '''
@@ -614,6 +921,7 @@ def student_analysis(user_id):
         <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
             <h2>📊 個人學習分析</h2>
             <p>此學生暫無足夠的互動數據進行分析。</p>
+            <a href="/student_list" style="color: #007bff;">← 返回學生列表</a>
         </div>
         '''
     
@@ -622,7 +930,7 @@ def student_analysis(user_id):
     <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
-        <title>{analysis['user_name']} - 個人分析</title>
+        <title>{analysis['user_name']} - 個人學習分析</title>
         <style>
             body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
             .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
@@ -630,10 +938,18 @@ def student_analysis(user_id):
             .section {{ margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; }}
             .metric {{ display: flex; justify-content: space-between; margin: 10px 0; }}
             .value {{ font-weight: bold; color: #007bff; }}
+            .nav-links {{ text-align: center; margin-bottom: 20px; }}
+            .nav-links a {{ margin: 0 10px; padding: 8px 16px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; }}
         </style>
     </head>
     <body>
         <div class="container">
+            <div class="nav-links">
+                <a href="/student_list">← 學生列表</a>
+                <a href="/class_analysis">📊 班級分析</a>
+                <a href="/">🏠 首頁</a>
+            </div>
+            
             <div class="header">
                 <h1>📊 {analysis['user_name']} 個人學習分析</h1>
                 <p>分析日期：{analysis['analysis_date']} | 學習期間：{analysis['study_period_days']} 天</p>
@@ -651,8 +967,16 @@ def student_analysis(user_id):
                     <span class="value">{analysis['participation']['active_days']} 天</span>
                 </div>
                 <div class="metric">
+                    <span>週平均活動</span>
+                    <span class="value">{analysis['participation']['avg_weekly_activity']}</span>
+                </div>
+                <div class="metric">
                     <span>參與度等級</span>
-                    <span class="value">{analysis['participation']['participation_level']}</span>
+                    <span class="value" style="color: {analysis['participation']['level_color']};">{analysis['participation']['participation_level']}</span>
+                </div>
+                <div class="metric">
+                    <span>學習一致性</span>
+                    <span class="value">{analysis['participation']['consistency_score']}%</span>
                 </div>
             </div>
             
@@ -765,12 +1089,42 @@ def class_analysis():
         total_students, active_students, avg_quality, avg_english, total_interactions = stats
         participation_rate = (active_students / total_students * 100) if total_students > 0 else 0
         
+        # 生成排行榜HTML
+        ranking_html = ""
+        for i, (name, interactions, quality, english) in enumerate(rankings, 1):
+            rank_color = "#ffd700" if i <= 3 else "#c0c0c0" if i <= 5 else "#cd7f32"
+            ranking_html += f'''
+                <tr>
+                    <td style="background: {rank_color}; color: white; font-weight: bold; text-align: center;">{i}</td>
+                    <td><strong>{name}</strong></td>
+                    <td>{interactions or 0}</td>
+                    <td>{quality:.2f if quality else 0}</td>
+                    <td>{english:.1%} if english else 0%</td>
+                </tr>
+            '''
+        
+        # 生成建議
+        suggestions = []
+        if participation_rate < 70:
+            suggestions.append("📈 班級參與率偏低，建議增加互動式活動和小組討論")
+        if avg_quality and avg_quality < 3.0:
+            suggestions.append("📚 整體討論品質需要提升，建議提供更多優質範例")
+        if avg_english and avg_english < 0.4:
+            suggestions.append("🌍 英語使用比例偏低，建議設計更多英語互動活動")
+        
+        if not suggestions:
+            suggestions.append("✨ 班級整體表現良好，繼續保持並持續優化教學方法")
+        
+        suggestions_html = ""
+        for suggestion in suggestions:
+            suggestions_html += f"<p>{suggestion}</p>"
+        
         return f'''
         <!DOCTYPE html>
         <html lang="zh-TW">
         <head>
             <meta charset="UTF-8">
-            <title>班級整體分析</title>
+            <title>班級整體分析報告</title>
             <style>
                 body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
                 .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
@@ -782,10 +1136,19 @@ def class_analysis():
                 table {{ width: 100%; border-collapse: collapse; }}
                 th, td {{ padding: 12px; border: 1px solid #ddd; text-align: left; }}
                 th {{ background: #f8f9fa; }}
+                .nav-links {{ text-align: center; margin-bottom: 20px; }}
+                .nav-links a {{ margin: 0 10px; padding: 8px 16px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; }}
             </style>
         </head>
         <body>
             <div class="container">
+                <div class="nav-links">
+                    <a href="/">🏠 首頁</a>
+                    <a href="/student_list">👥 學生列表</a>
+                    <a href="/research_dashboard">📈 研究數據</a>
+                    <a href="/simulate_interaction">📱 互動模擬</a>
+                </div>
+                
                 <div class="header">
                     <h1>📊 AI實務應用課程 - 班級整體分析</h1>
                     <p>分析時間：{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
@@ -828,45 +1191,14 @@ def class_analysis():
                             <th>平均品質</th>
                             <th>英語使用比例</th>
                         </tr>
-        '''
-        
-        for i, (name, interactions, quality, english) in enumerate(rankings, 1):
-            rank_color = "#ffd700" if i <= 3 else "#c0c0c0" if i <= 5 else "#cd7f32"
-            html_part = f'''
-                        <tr>
-                            <td style="background: {rank_color}; color: white; font-weight: bold; text-align: center;">{i}</td>
-                            <td><strong>{name}</strong></td>
-                            <td>{interactions or 0}</td>
-                            <td>{quality:.2f if quality else 0}</td>
-                            <td>{english:.1%} if english else 0%</td>
-                        </tr>
-            '''
-        
-        html_end = '''
+                        {ranking_html}
                     </table>
                 </div>
                 
                 <div class="section">
                     <h2>💡 教學改進建議</h2>
                     <div style="background: #d4edda; padding: 20px; border-radius: 8px; border-left: 4px solid #28a745;">
-        '''
-        
-        # 生成建議
-        suggestions = []
-        if participation_rate < 70:
-            suggestions.append("📈 班級參與率偏低，建議增加互動式活動和小組討論")
-        if avg_quality and avg_quality < 3.0:
-            suggestions.append("📚 整體討論品質需要提升，建議提供更多優質範例")
-        if avg_english and avg_english < 0.4:
-            suggestions.append("🌍 英語使用比例偏低，建議設計更多英語互動活動")
-        
-        if not suggestions:
-            suggestions.append("✨ 班級整體表現良好，繼續保持並持續優化教學方法")
-        
-        for suggestion in suggestions:
-            html_end += f"<p>{suggestion}</p>"
-        
-        html_end += '''
+                        {suggestions_html}
                     </div>
                 </div>
             </div>
@@ -874,10 +1206,8 @@ def class_analysis():
         </html>
         '''
         
-        return html_part + html_end
-        
     except Exception as e:
-        return f"錯誤: {e}"
+        return f"班級分析錯誤: {e}"
 
 @app.route("/research_dashboard")
 def research_dashboard():
@@ -902,6 +1232,19 @@ def research_dashboard():
         cursor.execute('SELECT AVG(english_ratio) FROM interactions WHERE english_ratio IS NOT NULL')
         avg_english = cursor.fetchone()[0] or 0
         
+        # 計算週使用率和發言次數
+        cursor.execute('''
+            SELECT COUNT(*) FROM interactions 
+            WHERE date(created_at) >= date('now', '-7 days')
+        ''')
+        week_interactions = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM users')
+        total_users = cursor.fetchone()[0]
+        
+        week_usage_rate = (week_interactions / max(total_users * 5, 1)) * 100  # 假設目標每週5次互動
+        avg_weekly_messages = week_interactions / max(active_students, 1) if active_students > 0 else 0
+        
         conn.close()
         
         return f'''
@@ -919,10 +1262,20 @@ def research_dashboard():
                 .metric-value {{ font-size: 2.5em; font-weight: bold; margin-bottom: 10px; }}
                 .metric-label {{ font-size: 1.1em; opacity: 0.9; }}
                 .status {{ background: #28a745; color: white; padding: 8px 16px; border-radius: 20px; display: inline-block; margin-top: 20px; }}
+                .nav-links {{ text-align: center; margin-bottom: 20px; }}
+                .nav-links a {{ margin: 0 10px; padding: 8px 16px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; }}
+                .research-section {{ margin: 40px 0; padding: 30px; background: #f8f9fa; border-radius: 10px; }}
             </style>
         </head>
         <body>
             <div class="container">
+                <div class="nav-links">
+                    <a href="/">🏠 首頁</a>
+                    <a href="/student_list">👥 學生列表</a>
+                    <a href="/class_analysis">📊 班級分析</a>
+                    <a href="/simulate_interaction">📱 互動模擬</a>
+                </div>
+                
                 <div class="header">
                     <h1>📊 EMI教學研究數據儀表板</h1>
                     <p>AI在生活與學習上的實務應用 - 教學實踐研究</p>
@@ -943,6 +1296,14 @@ def research_dashboard():
                         <div class="metric-label">今日使用量</div>
                     </div>
                     <div class="metric-card">
+                        <div class="metric-value">{week_usage_rate:.1f}%</div>
+                        <div class="metric-label">週使用率</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{avg_weekly_messages:.1f}</div>
+                        <div class="metric-label">平均發言次數/週</div>
+                    </div>
+                    <div class="metric-card">
                         <div class="metric-value">{avg_quality:.1f}/5.0</div>
                         <div class="metric-label">討論品質平均分</div>
                     </div>
@@ -956,13 +1317,44 @@ def research_dashboard():
                     </div>
                 </div>
                 
-                <div style="margin-top: 40px; text-align: center;">
-                    <h2>🎯 教學實踐研究目標</h2>
-                    <p>透過生成式AI輔助雙語教學，提升EMI課程學生參與度與跨文化能力</p>
+                <div class="research-section">
+                    <h2>🎯 114年度教學實踐研究計畫</h2>
+                    <h3>生成式AI輔助的雙語教學創新：提升EMI課程學生參與度與跨文化能力之教學實踐研究</h3>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px;">
+                        <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+                            <h4>📈 研究目標追蹤</h4>
+                            <p><strong>目標 1:</strong> 週使用率 ≥ 70% (目前: {week_usage_rate:.1f}%)</p>
+                            <p><strong>目標 2:</strong> 平均發言次數 ≥ 5次/週 (目前: {avg_weekly_messages:.1f}次)</p>
+                            <p><strong>目標 3:</strong> 討論品質 ≥ 3.5分 (目前: {avg_quality:.1f}分)</p>
+                            <p><strong>目標 4:</strong> 英語使用率 ≥ 50% (目前: {avg_english:.1%})</p>
+                        </div>
+                        
+                        <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #28a745;">
+                            <h4>🔬 研究方法</h4>
+                            <p>• 量化分析：學生參與度、討論品質統計</p>
+                            <p>• 質性分析：學習行為模式、跨文化能力</p>
+                            <p>• 混合研究：AI輔助教學效果評估</p>
+                            <p>• 縱向研究：18週學習歷程追蹤</p>
+                        </div>
+                        
+                        <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #ffc107;">
+                            <h4>📊 數據收集狀態</h4>
+                            <p>• 互動數據記錄：✅ 自動化收集</p>
+                            <p>• 品質分析系統：✅ 即時評分</p>
+                            <p>• 英語使用追蹤：✅ 雙語比例分析</p>
+                            <p>• 學習歷程記錄：✅ 完整時間序列</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="text-align: center; margin-top: 40px;">
+                    <h2>📄 研究數據匯出</h2>
+                    <p>支援教學實踐研究報告撰寫和學術論文發表</p>
                     <div style="margin-top: 20px;">
-                        <a href="/export_research_data" style="padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">📄 匯出研究數據</a>
-                        <a href="/student_list" style="padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">👥 查看學生分析</a>
-                        <a href="/class_analysis" style="padding: 12px 24px; background: #17a2b8; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">📊 班級整體分析</a>
+                        <a href="/export_research_data" style="padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">📊 匯出完整數據 (CSV)</a>
+                        <a href="/student_list" style="padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">👥 個人分析報告</a>
+                        <a href="/class_analysis" style="padding: 12px 24px; background: #17a2b8; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">📈 班級整體報告</a>
                     </div>
                 </div>
             </div>
@@ -971,7 +1363,7 @@ def research_dashboard():
         '''
         
     except Exception as e:
-        return f"錯誤: {e}"
+        return f"研究儀表板錯誤: {e}"
 
 @app.route("/export_research_data")
 def export_research_data():
@@ -994,13 +1386,13 @@ def export_research_data():
         # 生成CSV格式
         csv_content = "學生姓名,時間,內容,訊息類型,品質分數,英語比例,包含關鍵詞,群組互動\n"
         for row in data:
-            csv_content += f'"{row[0]}","{row[1]}","{row[2][:50]}...","{row[3]}",{row[4]},{row[5]},{row[6]},"{row[7] or ""}"\n'
+            content_preview = row[2][:50].replace('"', '""') if row[2] else ""  # 處理CSV中的引號
+            csv_content += f'"{row[0]}","{row[1]}","{content_preview}...","{row[3]}",{row[4] or 0},{row[5] or 0},{row[6] or 0},"{row[7] or ""}"\n'
         
-        from flask import Response
         return Response(
             csv_content,
             mimetype="text/csv",
-            headers={"Content-disposition": "attachment; filename=research_data.csv"}
+            headers={"Content-disposition": "attachment; filename=ai_course_research_data.csv"}
         )
         
     except Exception as e:
@@ -1012,14 +1404,71 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "system": "AI課程分析系統",
-        "version": "2.0"
+        "system": "AI課程分析系統 v2.0",
+        "line_bot_configured": line_bot_api is not None,
+        "database_accessible": True
     })
 
-# 初始化資料庫
+@app.route("/api/stats")
+def api_stats():
+    """API統計數據"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*) FROM interactions')
+        total_interactions = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM users')
+        total_students = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT AVG(quality_score) FROM interactions WHERE quality_score > 0')
+        avg_quality = cursor.fetchone()[0] or 0
+        
+        cursor.execute('SELECT AVG(english_ratio) FROM interactions WHERE english_ratio IS NOT NULL')
+        avg_english = cursor.fetchone()[0] or 0
+        
+        conn.close()
+        
+        return jsonify({
+            "total_interactions": total_interactions,
+            "total_students": total_students,
+            "avg_quality": round(avg_quality, 2),
+            "avg_english": round(avg_english, 3),
+            "current_week": get_current_week(),
+            "system_status": "operational"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 錯誤處理
+@app.errorhandler(404)
+def not_found(error):
+    return '''
+    <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
+        <h2>🔍 頁面未找到</h2>
+        <p>您要查找的頁面不存在。</p>
+        <a href="/" style="color: #007bff;">← 回到首頁</a>
+    </div>
+    ''', 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return '''
+    <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
+        <h2>⚠️ 系統錯誤</h2>
+        <p>系統發生錯誤，請稍後再試。</p>
+        <a href="/" style="color: #007bff;">← 回到首頁</a>
+    </div>
+    ''', 500
+
+# 初始化資料庫和啟動應用
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get('PORT', 5000))
+    print(f"🚀 啟動應用於 port {port}")
+    print(f"📊 LINE Bot 狀態: {'已配置' if line_bot_api else '未配置'}")
     app.run(host='0.0.0.0', port=port, debug=False)
 
 # Gunicorn 兼容性
