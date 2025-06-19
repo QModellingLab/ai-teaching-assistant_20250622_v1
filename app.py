@@ -1,3 +1,669 @@
+# app.py - Railway部署版本
+# LINE Bot + Gemini AI 教學助手 (完整研究功能整合版 - 修復版)
+
+import os
+import sqlite3
+import json
+import csv
+import io
+import re
+import random
+from datetime import datetime, timedelta
+from flask import Flask, request, abort, Response
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+import google.generativeai as genai
+
+# =============================================================================
+# 環境變數設定（Railway部署用）
+# =============================================================================
+
+# 從環境變數讀取API金鑰（部署時自動使用）
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '/FWGFeTl5+9MyyqJry49vlafcpvAl5d5UekpsZbkd/V5Cnk8zES8J9YDM6msNqkJJeC39ivYPA/zQNmuamcDQexc23SakFgwl61hPhdDsk4P2koHSusVKC4oYP67up/+AKrql1cQY8vLf3Tx3prh1QdB04t89/1O/w1cDnyilFU=')
+LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET', 'cf2728ecaf0dba522c10c15a99801f68')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyD2kVQffsdK0RDwHjIe8xWQAqlm-9ZK3Rs')
+
+# =============================================================================
+# 初始化設定
+# =============================================================================
+
+app = Flask(__name__)
+
+# LINE Bot API 初始化
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# Gemini AI 初始化
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+# =============================================================================
+# 進階資料庫設定 - 完整研究分析功能
+# =============================================================================
+
+def init_complete_database():
+    """初始化完整研究分析資料庫"""
+    try:
+        conn = sqlite3.connect('teaching_bot.db')
+        cursor = conn.cursor()
+        
+        # 原有基礎表格
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS student_interactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                user_name TEXT,
+                message TEXT,
+                ai_response TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                message_type TEXT DEFAULT 'question'
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS usage_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                date DATE DEFAULT CURRENT_DATE,
+                message_count INTEGER DEFAULT 1,
+                UNIQUE(user_id, date)
+            )
+        ''')
+        
+        # 進階分析表格
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS participation_analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                user_name TEXT,
+                message TEXT,
+                message_type TEXT,
+                message_length INTEGER,
+                word_count INTEGER,
+                english_ratio REAL,
+                interaction_quality_score REAL,
+                topic_category TEXT,
+                group_id TEXT,
+                week_number INTEGER,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                response_time_seconds INTEGER
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS group_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id TEXT NOT NULL,
+                group_name TEXT,
+                week_number INTEGER,
+                total_messages INTEGER DEFAULT 0,
+                unique_participants INTEGER DEFAULT 0,
+                avg_message_length REAL DEFAULT 0,
+                question_count INTEGER DEFAULT 0,
+                discussion_count INTEGER DEFAULT 0,
+                activity_score REAL DEFAULT 0,
+                discussion_quality_avg REAL DEFAULT 0,
+                last_activity_time DATETIME,
+                date DATE DEFAULT CURRENT_DATE,
+                UNIQUE(group_id, week_number)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS weekly_student_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                user_name TEXT,
+                week_number INTEGER,
+                message_count INTEGER DEFAULT 0,
+                question_count INTEGER DEFAULT 0,
+                discussion_count INTEGER DEFAULT 0,
+                avg_quality_score REAL DEFAULT 0,
+                total_words INTEGER DEFAULT 0,
+                english_usage_ratio REAL DEFAULT 0,
+                engagement_level TEXT DEFAULT 'medium',
+                topics_covered TEXT,
+                first_interaction DATETIME,
+                last_interaction DATETIME,
+                UNIQUE(user_id, week_number)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS topic_analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic_name TEXT NOT NULL,
+                week_number INTEGER,
+                mention_count INTEGER DEFAULT 1,
+                avg_quality_score REAL DEFAULT 0,
+                question_count INTEGER DEFAULT 0,
+                discussion_count INTEGER DEFAULT 0,
+                student_interest_level REAL DEFAULT 0,
+                date DATE DEFAULT CURRENT_DATE,
+                UNIQUE(topic_name, week_number)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ 完整研究分析資料庫初始化成功")
+        return True
+        
+    except Exception as e:
+        print(f"❌ 資料庫初始化錯誤: {e}")
+        return False
+
+# =============================================================================
+# 課程進度與週次管理
+# =============================================================================
+
+def get_current_week():
+    """獲取當前教學週次"""
+    # 假設第10週開始於2025年6月23日 (請根據實際情況調整)
+    start_date = datetime(2025, 6, 23)
+    current_date = datetime.now()
+    week_diff = (current_date - start_date).days // 7
+    current_week = 10 + week_diff
+    return min(max(current_week, 10), 17)
+
+def get_week_context(week_number):
+    """獲取週次課程背景資訊"""
+    course_schedule = {
+        10: {
+            'topic': 'Mass Customization by Industry 4.0',
+            'keywords': ['Industry 4.0', 'IoT', 'Smart Manufacturing', 'Automation'],
+            'focus': 'Understanding how Industry 4.0 enables personalized production'
+        },
+        11: {
+            'topic': 'Industry 4.0 Applications',
+            'keywords': ['Cyber-Physical Systems', 'Digital Twin', 'Predictive Maintenance'],
+            'focus': 'Real-world applications and case studies'
+        },
+        12: {
+            'topic': 'Smart Home Technologies',
+            'keywords': ['Smart Home', 'IoT Devices', 'Home Automation', 'AI Assistants'],
+            'focus': 'How AI makes homes intelligent and responsive'
+        },
+        13: {
+            'topic': 'Smart Home Implementation',
+            'keywords': ['Home Networks', 'Privacy', 'Security', 'User Experience'],
+            'focus': 'Practical considerations for smart home deployment'
+        },
+        14: {
+            'topic': 'AI in Art and Fashion',
+            'keywords': ['Creative AI', 'Generative Design', 'Fashion Tech', 'Digital Art'],
+            'focus': 'How AI is transforming creative industries'
+        },
+        15: {
+            'topic': 'Fashion and Art Innovation',
+            'keywords': ['Style Transfer', '3D Design', 'Virtual Fashion', 'AI Creativity'],
+            'focus': 'Innovation in design and artistic expression'
+        },
+        16: {
+            'topic': 'AI in Healthcare',
+            'keywords': ['Medical AI', 'Diagnostic Tools', 'Telemedicine', 'Health Monitoring'],
+            'focus': 'How AI is revolutionizing healthcare delivery'
+        },
+        17: {
+            'topic': 'Healthcare AI Applications',
+            'keywords': ['Clinical Decision Support', 'Drug Discovery', 'Personalized Medicine'],
+            'focus': 'Advanced applications and future possibilities'
+        }
+    }
+    
+    return course_schedule.get(week_number, {
+        'topic': 'General AI Applications',
+        'keywords': ['Artificial Intelligence', 'Machine Learning', 'Technology'],
+        'focus': 'Exploring AI applications in daily life'
+    })
+
+# =============================================================================
+# 訊息分析核心函數
+# =============================================================================
+
+def classify_message_type(message):
+    """自動分類訊息類型"""
+    message_lower = message.lower().strip()
+    
+    question_patterns = [
+        r'\?', r'？', r'\bwhat\b', r'\bhow\b', r'\bwhy\b', r'\bwhen\b', 
+        r'\bwhere\b', r'\bwhich\b', r'\bcan you\b', r'\bcould you\b',
+        r'什麼', r'如何', r'為什麼', r'怎麼', r'哪裡', r'什麼時候', r'可以.*嗎'
+    ]
+    
+    discussion_patterns = [
+        r'\bi think\b', r'\bin my opinion\b', r'\bi believe\b', r'\bconsider\b',
+        r'\banalyze\b', r'\bcompare\b', r'\bevaluate\b', r'\bassess\b',
+        r'我認為', r'我覺得', r'應該', r'可能', r'分析', r'比較', r'評估'
+    ]
+    
+    greeting_patterns = [
+        r'\bhello\b', r'\bhi\b', r'\bhey\b', r'\bgood morning\b', r'\bgood afternoon\b',
+        r'你好', r'哈囉', r'嗨', r'早安', r'午安', r'晚安'
+    ]
+    
+    if any(re.search(pattern, message_lower) for pattern in question_patterns):
+        return 'question'
+    elif any(re.search(pattern, message_lower) for pattern in discussion_patterns):
+        return 'discussion'
+    elif any(re.search(pattern, message_lower) for pattern in greeting_patterns):
+        return 'greeting'
+    else:
+        return 'response'
+
+def calculate_english_ratio(message):
+    """計算英語使用比例"""
+    english_chars = len(re.findall(r'[a-zA-Z]', message))
+    total_chars = len(re.sub(r'\s', '', message))
+    return min(english_chars / total_chars, 1.0) if total_chars > 0 else 0.0
+
+def count_words(message):
+    """計算單詞數量"""
+    english_words = len(re.findall(r'\b[a-zA-Z]+\b', message))
+    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', message))
+    return english_words + chinese_chars
+
+def classify_topic_category(message):
+    """自動分類討論主題"""
+    topic_keywords = {
+        'AI_Technology': [
+            'artificial intelligence', 'machine learning', 'deep learning', 'neural network',
+            'algorithm', 'ai model', 'training data', 'prediction',
+            '人工智慧', '機器學習', '深度學習', '神經網路', '演算法', 'AI模型'
+        ],
+        'Industry_4.0': [
+            'industry 4.0', 'industrial revolution', 'iot', 'internet of things',
+            'smart manufacturing', 'automation', 'robotics', 'cyber physical',
+            '工業4.0', '工業革命', '物聯網', '智慧製造', '自動化', '機器人'
+        ],
+        'Smart_Home': [
+            'smart home', 'home automation', 'smart devices', 'smart speaker',
+            'home assistant', 'iot home', 'connected home',
+            '智慧家庭', '家庭自動化', '智慧裝置', '智慧音箱', '居家助理'
+        ],
+        'Healthcare': [
+            'healthcare', 'medical ai', 'telemedicine', 'health monitoring',
+            'medical diagnosis', 'patient care', 'health data',
+            '醫療', '健康照護', '遠距醫療', '健康監測', '醫療診斷', '病患照護'
+        ],
+        'Ethics_Privacy': [
+            'ethics', 'privacy', 'bias', 'fairness', 'responsibility',
+            'data protection', 'algorithmic bias', 'ai ethics',
+            '倫理', '隱私', '偏見', '公平性', '責任', '資料保護', '演算法偏見'
+        ],
+        'Future_Trends': [
+            'future', 'prediction', 'trends', 'development', 'innovation',
+            'emerging technology', 'next generation', 'advancement',
+            '未來', '趨勢', '發展', '創新', '新興技術', '下一代', '進步'
+        ]
+    }
+    
+    message_lower = message.lower()
+    topic_scores = {}
+    
+    for topic, keywords in topic_keywords.items():
+        score = sum(1 for keyword in keywords if keyword.lower() in message_lower)
+        if score > 0:
+            topic_scores[topic] = score
+    
+    return max(topic_scores, key=topic_scores.get) if topic_scores else 'General_Discussion'
+
+def evaluate_content_quality(message, message_type):
+    """內容品質評估"""
+    score = 2.0
+    length = len(message.strip())
+    word_count = count_words(message)
+    
+    # 長度加分
+    if length > 100:
+        score += 1.0
+    elif length > 50:
+        score += 0.5
+    
+    # 單詞數加分
+    if word_count > 20:
+        score += 0.5
+    
+    # 訊息類型調整
+    if message_type == 'question':
+        score += 0.3
+    elif message_type == 'discussion':
+        score += 0.5
+    
+    # 學術關鍵詞加分
+    academic_keywords = [
+        'example', 'because', 'therefore', 'however', 'analysis', 'consider',
+        'compare', 'evaluate', 'advantage', 'disadvantage', 'benefit', 'challenge',
+        '例如', '因為', '所以', '然而', '分析', '考慮', '比較', '評估', '優點', '缺點'
+    ]
+    
+    keyword_bonus = sum(0.2 for keyword in academic_keywords if keyword.lower() in message.lower())
+    score += min(keyword_bonus, 1.0)
+    
+    return min(max(score, 1.0), 5.0)
+
+def calculate_engagement_level(msg_count, question_count, discussion_count, avg_quality):
+    """計算學生參與度等級"""
+    base_score = msg_count * 2
+    interactive_score = question_count * 3 + discussion_count * 4
+    quality_score = avg_quality * 2
+    total_score = base_score + interactive_score + quality_score
+    
+    if total_score >= 25:
+        return 'high'
+    elif total_score >= 15:
+        return 'medium'
+    else:
+        return 'low'
+
+# =============================================================================
+# 主要分析函數
+# =============================================================================
+
+def analyze_message_comprehensive(user_id, user_name, message, group_id=None):
+    """全面分析學生訊息"""
+    try:
+        message_type = classify_message_type(message)
+        message_length = len(message.strip())
+        word_count = count_words(message)
+        english_ratio = calculate_english_ratio(message)
+        topic_category = classify_topic_category(message)
+        current_week = get_current_week()
+        quality_score = evaluate_content_quality(message, message_type)
+        
+        # 儲存詳細分析結果
+        conn = sqlite3.connect('teaching_bot.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO participation_analytics 
+            (user_id, user_name, message, message_type, message_length, 
+             word_count, english_ratio, interaction_quality_score, 
+             topic_category, group_id, week_number, response_time_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, user_name, message, message_type, message_length,
+              word_count, english_ratio, quality_score, 
+              topic_category, group_id, current_week, 0))
+        
+        # 更新各種統計
+        update_weekly_student_stats(user_id, user_name, current_week, message_type, 
+                                   quality_score, word_count, english_ratio, topic_category)
+        update_topic_analytics(topic_category, current_week, quality_score, message_type)
+        
+        if group_id:
+            update_group_activity_stats(group_id, current_week, message_type, quality_score, message_length)
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'message_type': message_type,
+            'quality_score': quality_score,
+            'topic_category': topic_category,
+            'week_number': current_week,
+            'english_ratio': english_ratio,
+            'word_count': word_count
+        }
+        
+    except Exception as e:
+        print(f"❌ 訊息分析錯誤: {e}")
+        return {
+            'message_type': 'response',
+            'quality_score': 3.0,
+            'topic_category': 'General_Discussion',
+            'week_number': get_current_week(),
+            'english_ratio': 0.5,
+            'word_count': 10
+        }
+
+def update_weekly_student_stats(user_id, user_name, week_number, message_type, 
+                               quality_score, word_count, english_ratio, topic_category):
+    """更新學生週統計"""
+    try:
+        conn = sqlite3.connect('teaching_bot.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT message_count, question_count, discussion_count, 
+                   avg_quality_score, total_words, english_usage_ratio, topics_covered
+            FROM weekly_student_stats 
+            WHERE user_id = ? AND week_number = ?
+        ''', (user_id, week_number))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            old_msg_count, old_q_count, old_d_count, old_quality, old_words, old_english, old_topics = existing
+            
+            new_msg_count = old_msg_count + 1
+            new_q_count = old_q_count + (1 if message_type == 'question' else 0)
+            new_d_count = old_d_count + (1 if message_type == 'discussion' else 0)
+            new_quality = (old_quality * old_msg_count + quality_score) / new_msg_count
+            new_words = old_words + word_count
+            new_english = (old_english * old_msg_count + english_ratio) / new_msg_count
+            
+            topics_list = json.loads(old_topics) if old_topics else []
+            if topic_category not in topics_list:
+                topics_list.append(topic_category)
+            new_topics = json.dumps(topics_list)
+            
+            engagement_level = calculate_engagement_level(new_msg_count, new_q_count, new_d_count, new_quality)
+            
+            cursor.execute('''
+                UPDATE weekly_student_stats 
+                SET message_count = ?, question_count = ?, discussion_count = ?,
+                    avg_quality_score = ?, total_words = ?, english_usage_ratio = ?,
+                    engagement_level = ?, topics_covered = ?, last_interaction = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND week_number = ?
+            ''', (new_msg_count, new_q_count, new_d_count, new_quality, 
+                  new_words, new_english, engagement_level, new_topics, user_id, week_number))
+        else:
+            engagement_level = calculate_engagement_level(1, 
+                                                        1 if message_type == 'question' else 0,
+                                                        1 if message_type == 'discussion' else 0, 
+                                                        quality_score)
+            topics_list = [topic_category]
+            
+            cursor.execute('''
+                INSERT INTO weekly_student_stats 
+                (user_id, user_name, week_number, message_count, question_count, 
+                 discussion_count, avg_quality_score, total_words, english_usage_ratio,
+                 engagement_level, topics_covered, first_interaction, last_interaction)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ''', (user_id, user_name, week_number, 1, 
+                  1 if message_type == 'question' else 0,
+                  1 if message_type == 'discussion' else 0,
+                  quality_score, word_count, english_ratio, engagement_level, 
+                  json.dumps(topics_list)))
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        print(f"❌ 學生週統計更新錯誤: {e}")
+
+def update_topic_analytics(topic_name, week_number, quality_score, message_type):
+    """更新主題分析統計"""
+    try:
+        conn = sqlite3.connect('teaching_bot.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT mention_count, avg_quality_score, question_count, discussion_count
+            FROM topic_analytics 
+            WHERE topic_name = ? AND week_number = ?
+        ''', (topic_name, week_number))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            old_count, old_quality, old_q_count, old_d_count = existing
+            new_count = old_count + 1
+            new_quality = (old_quality * old_count + quality_score) / new_count
+            new_q_count = old_q_count + (1 if message_type == 'question' else 0)
+            new_d_count = old_d_count + (1 if message_type == 'discussion' else 0)
+            
+            cursor.execute('''
+                UPDATE topic_analytics 
+                SET mention_count = ?, avg_quality_score = ?, question_count = ?, discussion_count = ?
+                WHERE topic_name = ? AND week_number = ?
+            ''', (new_count, new_quality, new_q_count, new_d_count, topic_name, week_number))
+        else:
+            cursor.execute('''
+                INSERT INTO topic_analytics 
+                (topic_name, week_number, mention_count, avg_quality_score, 
+                 question_count, discussion_count, student_interest_level)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (topic_name, week_number, 1, quality_score,
+                  1 if message_type == 'question' else 0,
+                  1 if message_type == 'discussion' else 0,
+                  quality_score))
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        print(f"❌ 主題統計更新錯誤: {e}")
+
+def update_group_activity_stats(group_id, week_number, message_type, quality_score, message_length):
+    """更新群組活躍度統計"""
+    try:
+        conn = sqlite3.connect('teaching_bot.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(DISTINCT user_id) 
+            FROM participation_analytics 
+            WHERE group_id = ? AND week_number = ?
+        ''', (group_id, week_number))
+        
+        unique_participants = cursor.fetchone()[0]
+        
+        cursor.execute('''
+            SELECT total_messages, avg_message_length, question_count, 
+                   discussion_count, discussion_quality_avg
+            FROM group_activity 
+            WHERE group_id = ? AND week_number = ?
+        ''', (group_id, week_number))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            old_msgs, old_avg_length, old_q_count, old_d_count, old_quality = existing
+            
+            new_msgs = old_msgs + 1
+            new_avg_length = (old_avg_length * old_msgs + message_length) / new_msgs
+            new_q_count = old_q_count + (1 if message_type == 'question' else 0)
+            new_d_count = old_d_count + (1 if message_type == 'discussion' else 0)
+            new_quality = (old_quality * old_msgs + quality_score) / new_msgs
+            
+            activity_score = calculate_group_activity_score(new_msgs, unique_participants, new_quality)
+            
+            cursor.execute('''
+                UPDATE group_activity 
+                SET total_messages = ?, unique_participants = ?, avg_message_length = ?,
+                    question_count = ?, discussion_count = ?, activity_score = ?,
+                    discussion_quality_avg = ?, last_activity_time = CURRENT_TIMESTAMP
+                WHERE group_id = ? AND week_number = ?
+            ''', (new_msgs, unique_participants, new_avg_length, new_q_count, new_d_count,
+                  activity_score, new_quality, group_id, week_number))
+        else:
+            activity_score = calculate_group_activity_score(1, unique_participants, quality_score)
+            
+            cursor.execute('''
+                INSERT INTO group_activity 
+                (group_id, week_number, total_messages, unique_participants, 
+                 avg_message_length, question_count, discussion_count, activity_score,
+                 discussion_quality_avg, last_activity_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (group_id, week_number, 1, unique_participants, message_length,
+                  1 if message_type == 'question' else 0,
+                  1 if message_type == 'discussion' else 0,
+                  activity_score, quality_score))
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        print(f"❌ 群組活躍度更新錯誤: {e}")
+
+def calculate_group_activity_score(total_messages, unique_participants, avg_quality):
+    """計算群組活躍度分數"""
+    message_score = min(total_messages * 1.5, 30)
+    participation_score = min(unique_participants * 6, 40)
+    quality_score = (avg_quality or 0) * 6
+    return round(message_score + participation_score + quality_score, 2)
+
+# =============================================================================
+# AI 教學助手功能 - 增強版EMI教學
+# =============================================================================
+
+def generate_ai_response_with_context(user_message, user_name, analysis_result):
+    """根據分析結果生成上下文感知的AI回應"""
+    message_type = analysis_result['message_type']
+    topic_category = analysis_result['topic_category']
+    week_number = analysis_result['week_number']
+    
+    # 根據訊息類型調整回應策略
+    if message_type == 'question':
+        response_style = "provide a clear, educational answer"
+    elif message_type == 'discussion':
+        response_style = "engage thoughtfully and encourage further discussion"
+    elif message_type == 'greeting':
+        response_style = "respond warmly and guide toward course topics"
+    else:
+        response_style = "provide supportive feedback"
+    
+    # 課程週次上下文
+    course_context = get_week_context(week_number)
+    
+    # 根據主題類別提供相關背景
+    topic_context = ""
+    if topic_category != 'General_Discussion':
+        topic_context = f"The student is asking about {topic_category.replace('_', ' ')}. "
+    
+    enhanced_prompt = f"""
+You are an AI Teaching Assistant for "Practical Applications of AI in Life and Learning" (EMI course).
+
+CONTEXT:
+- Student: {user_name}
+- Current Week: {week_number} 
+- Course Topic: {course_context.get('topic', 'General AI Applications')}
+- Message Type: {message_type}
+- Topic Category: {topic_category}
+- {topic_context}
+
+STUDENT MESSAGE: "{user_message}"
+
+RESPONSE STRATEGY: {response_style}
+
+GUIDELINES:
+1. Keep response SHORT (2-3 sentences max)
+2. Primary language: English (EMI course)
+3. Use Traditional Chinese assistance when needed (關鍵術語繁體中文)
+4. Connect to current week's topic when relevant: {course_context.get('keywords', [])}
+5. Encourage critical thinking for discussions
+6. Be supportive and educational
+7. End with "Want to know more?" or "需要更詳細的說明嗎？" when appropriate
+
+Respond appropriately based on the context and analysis.
+"""
+    
+    try:
+        response = model.generate_content(enhanced_prompt)
+        if response.text:
+            return response.text.strip()
+        else:
+            return "I apologize, but I cannot answer this question right now. Please try again later."
+    except Exception as e:
+        print(f"AI Response Error: {e}")
+        return "I'm sorry, the AI assistant is temporarily unavailable. Please try again later."
+
+# =============================================================================
+# 原有功能保持兼容性
+# =============================================================================
+
 def save_interaction(user_id, user_name, message, ai_response):
     """記錄學生與AI的互動 (保持原有兼容性)"""
     try:
@@ -913,671 +1579,4 @@ if __name__ == "__main__":
     
     # Railway部署設定
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)# app.py - Railway部署版本
-# LINE Bot + Gemini AI 教學助手 (完整研究功能整合版 - 修復版)
-
-import os
-import sqlite3
-import json
-import csv
-import io
-import re
-import random
-from datetime import datetime, timedelta
-from flask import Flask, request, abort, Response
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import google.generativeai as genai
-
-# =============================================================================
-# 環境變數設定（Railway部署用）
-# =============================================================================
-
-# 從環境變數讀取API金鑰（部署時自動使用）
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '/FWGFeTl5+9MyyqJry49vlafcpvAl5d5UekpsZbkd/V5Cnk8zES8J9YDM6msNqkJJeC39ivYPA/zQNmuamcDQexc23SakFgwl61hPhdDsk4P2koHSusVKC4oYP67up/+AKrql1cQY8vLf3Tx3prh1QdB04t89/1O/w1cDnyilFU=')
-LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET', 'cf2728ecaf0dba522c10c15a99801f68')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyD2kVQffsdK0RDwHjIe8xWQAqlm-9ZK3Rs')
-
-# =============================================================================
-# 初始化設定
-# =============================================================================
-
-app = Flask(__name__)
-
-# LINE Bot API 初始化
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
-
-# Gemini AI 初始化
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
-
-# =============================================================================
-# 進階資料庫設定 - 完整研究分析功能
-# =============================================================================
-
-def init_complete_database():
-    """初始化完整研究分析資料庫"""
-    try:
-        conn = sqlite3.connect('teaching_bot.db')
-        cursor = conn.cursor()
-        
-        # 原有基礎表格
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS student_interactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                user_name TEXT,
-                message TEXT,
-                ai_response TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                message_type TEXT DEFAULT 'question'
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS usage_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                date DATE DEFAULT CURRENT_DATE,
-                message_count INTEGER DEFAULT 1,
-                UNIQUE(user_id, date)
-            )
-        ''')
-        
-        # 進階分析表格
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS participation_analytics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                user_name TEXT,
-                message TEXT,
-                message_type TEXT,
-                message_length INTEGER,
-                word_count INTEGER,
-                english_ratio REAL,
-                interaction_quality_score REAL,
-                topic_category TEXT,
-                group_id TEXT,
-                week_number INTEGER,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                response_time_seconds INTEGER
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS group_activity (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id TEXT NOT NULL,
-                group_name TEXT,
-                week_number INTEGER,
-                total_messages INTEGER DEFAULT 0,
-                unique_participants INTEGER DEFAULT 0,
-                avg_message_length REAL DEFAULT 0,
-                question_count INTEGER DEFAULT 0,
-                discussion_count INTEGER DEFAULT 0,
-                activity_score REAL DEFAULT 0,
-                discussion_quality_avg REAL DEFAULT 0,
-                last_activity_time DATETIME,
-                date DATE DEFAULT CURRENT_DATE,
-                UNIQUE(group_id, week_number)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS weekly_student_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                user_name TEXT,
-                week_number INTEGER,
-                message_count INTEGER DEFAULT 0,
-                question_count INTEGER DEFAULT 0,
-                discussion_count INTEGER DEFAULT 0,
-                avg_quality_score REAL DEFAULT 0,
-                total_words INTEGER DEFAULT 0,
-                english_usage_ratio REAL DEFAULT 0,
-                engagement_level TEXT DEFAULT 'medium',
-                topics_covered TEXT,
-                first_interaction DATETIME,
-                last_interaction DATETIME,
-                UNIQUE(user_id, week_number)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS topic_analytics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                topic_name TEXT NOT NULL,
-                week_number INTEGER,
-                mention_count INTEGER DEFAULT 1,
-                avg_quality_score REAL DEFAULT 0,
-                question_count INTEGER DEFAULT 0,
-                discussion_count INTEGER DEFAULT 0,
-                student_interest_level REAL DEFAULT 0,
-                date DATE DEFAULT CURRENT_DATE,
-                UNIQUE(topic_name, week_number)
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-        print("✅ 完整研究分析資料庫初始化成功")
-        return True
-        
-    except Exception as e:
-        print(f"❌ 資料庫初始化錯誤: {e}")
-        return False
-
-# =============================================================================
-# 課程進度與週次管理
-# =============================================================================
-
-def get_current_week():
-    """獲取當前教學週次"""
-    # 假設第10週開始於2025年6月23日 (請根據實際情況調整)
-    start_date = datetime(2025, 6, 23)
-    current_date = datetime.now()
-    week_diff = (current_date - start_date).days // 7
-    current_week = 10 + week_diff
-    return min(max(current_week, 10), 17)
-
-def get_week_context(week_number):
-    """獲取週次課程背景資訊"""
-    course_schedule = {
-        10: {
-            'topic': 'Mass Customization by Industry 4.0',
-            'keywords': ['Industry 4.0', 'IoT', 'Smart Manufacturing', 'Automation'],
-            'focus': 'Understanding how Industry 4.0 enables personalized production'
-        },
-        11: {
-            'topic': 'Industry 4.0 Applications',
-            'keywords': ['Cyber-Physical Systems', 'Digital Twin', 'Predictive Maintenance'],
-            'focus': 'Real-world applications and case studies'
-        },
-        12: {
-            'topic': 'Smart Home Technologies',
-            'keywords': ['Smart Home', 'IoT Devices', 'Home Automation', 'AI Assistants'],
-            'focus': 'How AI makes homes intelligent and responsive'
-        },
-        13: {
-            'topic': 'Smart Home Implementation',
-            'keywords': ['Home Networks', 'Privacy', 'Security', 'User Experience'],
-            'focus': 'Practical considerations for smart home deployment'
-        },
-        14: {
-            'topic': 'AI in Art and Fashion',
-            'keywords': ['Creative AI', 'Generative Design', 'Fashion Tech', 'Digital Art'],
-            'focus': 'How AI is transforming creative industries'
-        },
-        15: {
-            'topic': 'Fashion and Art Innovation',
-            'keywords': ['Style Transfer', '3D Design', 'Virtual Fashion', 'AI Creativity'],
-            'focus': 'Innovation in design and artistic expression'
-        },
-        16: {
-            'topic': 'AI in Healthcare',
-            'keywords': ['Medical AI', 'Diagnostic Tools', 'Telemedicine', 'Health Monitoring'],
-            'focus': 'How AI is revolutionizing healthcare delivery'
-        },
-        17: {
-            'topic': 'Healthcare AI Applications',
-            'keywords': ['Clinical Decision Support', 'Drug Discovery', 'Personalized Medicine'],
-            'focus': 'Advanced applications and future possibilities'
-        }
-    }
-    
-    return course_schedule.get(week_number, {
-        'topic': 'General AI Applications',
-        'keywords': ['Artificial Intelligence', 'Machine Learning', 'Technology'],
-        'focus': 'Exploring AI applications in daily life'
-    })
-
-# =============================================================================
-# 訊息分析核心函數
-# =============================================================================
-
-def classify_message_type(message):
-    """自動分類訊息類型"""
-    message_lower = message.lower().strip()
-    
-    question_patterns = [
-        r'\?', r'？', r'\bwhat\b', r'\bhow\b', r'\bwhy\b', r'\bwhen\b', 
-        r'\bwhere\b', r'\bwhich\b', r'\bcan you\b', r'\bcould you\b',
-        r'什麼', r'如何', r'為什麼', r'怎麼', r'哪裡', r'什麼時候', r'可以.*嗎'
-    ]
-    
-    discussion_patterns = [
-        r'\bi think\b', r'\bin my opinion\b', r'\bi believe\b', r'\bconsider\b',
-        r'\banalyze\b', r'\bcompare\b', r'\bevaluate\b', r'\bassess\b',
-        r'我認為', r'我覺得', r'應該', r'可能', r'分析', r'比較', r'評估'
-    ]
-    
-    greeting_patterns = [
-        r'\bhello\b', r'\bhi\b', r'\bhey\b', r'\bgood morning\b', r'\bgood afternoon\b',
-        r'你好', r'哈囉', r'嗨', r'早安', r'午安', r'晚安'
-    ]
-    
-    if any(re.search(pattern, message_lower) for pattern in question_patterns):
-        return 'question'
-    elif any(re.search(pattern, message_lower) for pattern in discussion_patterns):
-        return 'discussion'
-    elif any(re.search(pattern, message_lower) for pattern in greeting_patterns):
-        return 'greeting'
-    else:
-        return 'response'
-
-def calculate_english_ratio(message):
-    """計算英語使用比例"""
-    english_chars = len(re.findall(r'[a-zA-Z]', message))
-    total_chars = len(re.sub(r'\s', '', message))
-    return min(english_chars / total_chars, 1.0) if total_chars > 0 else 0.0
-
-def count_words(message):
-    """計算單詞數量"""
-    english_words = len(re.findall(r'\b[a-zA-Z]+\b', message))
-    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', message))
-    return english_words + chinese_chars
-
-def classify_topic_category(message):
-    """自動分類討論主題"""
-    topic_keywords = {
-        'AI_Technology': [
-            'artificial intelligence', 'machine learning', 'deep learning', 'neural network',
-            'algorithm', 'ai model', 'training data', 'prediction',
-            '人工智慧', '機器學習', '深度學習', '神經網路', '演算法', 'AI模型'
-        ],
-        'Industry_4.0': [
-            'industry 4.0', 'industrial revolution', 'iot', 'internet of things',
-            'smart manufacturing', 'automation', 'robotics', 'cyber physical',
-            '工業4.0', '工業革命', '物聯網', '智慧製造', '自動化', '機器人'
-        ],
-        'Smart_Home': [
-            'smart home', 'home automation', 'smart devices', 'smart speaker',
-            'home assistant', 'iot home', 'connected home',
-            '智慧家庭', '家庭自動化', '智慧裝置', '智慧音箱', '居家助理'
-        ],
-        'Healthcare': [
-            'healthcare', 'medical ai', 'telemedicine', 'health monitoring',
-            'medical diagnosis', 'patient care', 'health data',
-            '醫療', '健康照護', '遠距醫療', '健康監測', '醫療診斷', '病患照護'
-        ],
-        'Ethics_Privacy': [
-            'ethics', 'privacy', 'bias', 'fairness', 'responsibility',
-            'data protection', 'algorithmic bias', 'ai ethics',
-            '倫理', '隱私', '偏見', '公平性', '責任', '資料保護', '演算法偏見'
-        ],
-        'Future_Trends': [
-            'future', 'prediction', 'trends', 'development', 'innovation',
-            'emerging technology', 'next generation', 'advancement',
-            '未來', '趨勢', '發展', '創新', '新興技術', '下一代', '進步'
-        ]
-    }
-    
-    message_lower = message.lower()
-    topic_scores = {}
-    
-    for topic, keywords in topic_keywords.items():
-        score = sum(1 for keyword in keywords if keyword.lower() in message_lower)
-        if score > 0:
-            topic_scores[topic] = score
-    
-    return max(topic_scores, key=topic_scores.get) if topic_scores else 'General_Discussion'
-
-def evaluate_content_quality(message, message_type):
-    """內容品質評估"""
-    score = 2.0
-    length = len(message.strip())
-    word_count = count_words(message)
-    
-    # 長度加分
-    if length > 100:
-        score += 1.0
-    elif length > 50:
-        score += 0.5
-    
-    # 單詞數加分
-    if word_count > 20:
-        score += 0.5
-    
-    # 訊息類型調整
-    if message_type == 'question':
-        score += 0.3
-    elif message_type == 'discussion':
-        score += 0.5
-    
-    # 學術關鍵詞加分
-    academic_keywords = [
-        'example', 'because', 'therefore', 'however', 'analysis', 'consider',
-        'compare', 'evaluate', 'advantage', 'disadvantage', 'benefit', 'challenge',
-        '例如', '因為', '所以', '然而', '分析', '考慮', '比較', '評估', '優點', '缺點'
-    ]
-    
-    keyword_bonus = sum(0.2 for keyword in academic_keywords if keyword.lower() in message.lower())
-    score += min(keyword_bonus, 1.0)
-    
-    return min(max(score, 1.0), 5.0)
-
-def calculate_engagement_level(msg_count, question_count, discussion_count, avg_quality):
-    """計算學生參與度等級"""
-    base_score = msg_count * 2
-    interactive_score = question_count * 3 + discussion_count * 4
-    quality_score = avg_quality * 2
-    total_score = base_score + interactive_score + quality_score
-    
-    if total_score >= 25:
-        return 'high'
-    elif total_score >= 15:
-        return 'medium'
-    else:
-        return 'low'
-
-# =============================================================================
-# 主要分析函數
-# =============================================================================
-
-def analyze_message_comprehensive(user_id, user_name, message, group_id=None):
-    """全面分析學生訊息"""
-    try:
-        message_type = classify_message_type(message)
-        message_length = len(message.strip())
-        word_count = count_words(message)
-        english_ratio = calculate_english_ratio(message)
-        topic_category = classify_topic_category(message)
-        current_week = get_current_week()
-        quality_score = evaluate_content_quality(message, message_type)
-        
-        # 儲存詳細分析結果
-        conn = sqlite3.connect('teaching_bot.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO participation_analytics 
-            (user_id, user_name, message, message_type, message_length, 
-             word_count, english_ratio, interaction_quality_score, 
-             topic_category, group_id, week_number, response_time_seconds)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, user_name, message, message_type, message_length,
-              word_count, english_ratio, quality_score, 
-              topic_category, group_id, current_week, 0))
-        
-        # 更新各種統計
-        update_weekly_student_stats(user_id, user_name, current_week, message_type, 
-                                   quality_score, word_count, english_ratio, topic_category)
-        update_topic_analytics(topic_category, current_week, quality_score, message_type)
-        
-        if group_id:
-            update_group_activity_stats(group_id, current_week, message_type, quality_score, message_length)
-        
-        conn.commit()
-        conn.close()
-        
-        return {
-            'message_type': message_type,
-            'quality_score': quality_score,
-            'topic_category': topic_category,
-            'week_number': current_week,
-            'english_ratio': english_ratio,
-            'word_count': word_count
-        }
-        
-    except Exception as e:
-        print(f"❌ 訊息分析錯誤: {e}")
-        return {
-            'message_type': 'response',
-            'quality_score': 3.0,
-            'topic_category': 'General_Discussion',
-            'week_number': get_current_week(),
-            'english_ratio': 0.5,
-            'word_count': 10
-        }
-
-def update_weekly_student_stats(user_id, user_name, week_number, message_type, 
-                               quality_score, word_count, english_ratio, topic_category):
-    """更新學生週統計"""
-    try:
-        conn = sqlite3.connect('teaching_bot.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT message_count, question_count, discussion_count, 
-                   avg_quality_score, total_words, english_usage_ratio, topics_covered
-            FROM weekly_student_stats 
-            WHERE user_id = ? AND week_number = ?
-        ''', (user_id, week_number))
-        
-        existing = cursor.fetchone()
-        
-        if existing:
-            old_msg_count, old_q_count, old_d_count, old_quality, old_words, old_english, old_topics = existing
-            
-            new_msg_count = old_msg_count + 1
-            new_q_count = old_q_count + (1 if message_type == 'question' else 0)
-            new_d_count = old_d_count + (1 if message_type == 'discussion' else 0)
-            new_quality = (old_quality * old_msg_count + quality_score) / new_msg_count
-            new_words = old_words + word_count
-            new_english = (old_english * old_msg_count + english_ratio) / new_msg_count
-            
-            topics_list = json.loads(old_topics) if old_topics else []
-            if topic_category not in topics_list:
-                topics_list.append(topic_category)
-            new_topics = json.dumps(topics_list)
-            
-            engagement_level = calculate_engagement_level(new_msg_count, new_q_count, new_d_count, new_quality)
-            
-            cursor.execute('''
-                UPDATE weekly_student_stats 
-                SET message_count = ?, question_count = ?, discussion_count = ?,
-                    avg_quality_score = ?, total_words = ?, english_usage_ratio = ?,
-                    engagement_level = ?, topics_covered = ?, last_interaction = CURRENT_TIMESTAMP
-                WHERE user_id = ? AND week_number = ?
-            ''', (new_msg_count, new_q_count, new_d_count, new_quality, 
-                  new_words, new_english, engagement_level, new_topics, user_id, week_number))
-        else:
-            engagement_level = calculate_engagement_level(1, 
-                                                        1 if message_type == 'question' else 0,
-                                                        1 if message_type == 'discussion' else 0, 
-                                                        quality_score)
-            topics_list = [topic_category]
-            
-            cursor.execute('''
-                INSERT INTO weekly_student_stats 
-                (user_id, user_name, week_number, message_count, question_count, 
-                 discussion_count, avg_quality_score, total_words, english_usage_ratio,
-                 engagement_level, topics_covered, first_interaction, last_interaction)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ''', (user_id, user_name, week_number, 1, 
-                  1 if message_type == 'question' else 0,
-                  1 if message_type == 'discussion' else 0,
-                  quality_score, word_count, english_ratio, engagement_level, 
-                  json.dumps(topics_list)))
-        
-        conn.commit()
-        conn.close()
-        
-    except Exception as e:
-        print(f"❌ 學生週統計更新錯誤: {e}")
-
-def update_topic_analytics(topic_name, week_number, quality_score, message_type):
-    """更新主題分析統計"""
-    try:
-        conn = sqlite3.connect('teaching_bot.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT mention_count, avg_quality_score, question_count, discussion_count
-            FROM topic_analytics 
-            WHERE topic_name = ? AND week_number = ?
-        ''', (topic_name, week_number))
-        
-        existing = cursor.fetchone()
-        
-        if existing:
-            old_count, old_quality, old_q_count, old_d_count = existing
-            new_count = old_count + 1
-            new_quality = (old_quality * old_count + quality_score) / new_count
-            new_q_count = old_q_count + (1 if message_type == 'question' else 0)
-            new_d_count = old_d_count + (1 if message_type == 'discussion' else 0)
-            
-            cursor.execute('''
-                UPDATE topic_analytics 
-                SET mention_count = ?, avg_quality_score = ?, question_count = ?, discussion_count = ?
-                WHERE topic_name = ? AND week_number = ?
-            ''', (new_count, new_quality, new_q_count, new_d_count, topic_name, week_number))
-        else:
-            cursor.execute('''
-                INSERT INTO topic_analytics 
-                (topic_name, week_number, mention_count, avg_quality_score, 
-                 question_count, discussion_count, student_interest_level)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (topic_name, week_number, 1, quality_score,
-                  1 if message_type == 'question' else 0,
-                  1 if message_type == 'discussion' else 0,
-                  quality_score))
-        
-        conn.commit()
-        conn.close()
-        
-    except Exception as e:
-        print(f"❌ 主題統計更新錯誤: {e}")
-
-def update_group_activity_stats(group_id, week_number, message_type, quality_score, message_length):
-    """更新群組活躍度統計"""
-    try:
-        conn = sqlite3.connect('teaching_bot.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT COUNT(DISTINCT user_id) 
-            FROM participation_analytics 
-            WHERE group_id = ? AND week_number = ?
-        ''', (group_id, week_number))
-        
-        unique_participants = cursor.fetchone()[0]
-        
-        cursor.execute('''
-            SELECT total_messages, avg_message_length, question_count, 
-                   discussion_count, discussion_quality_avg
-            FROM group_activity 
-            WHERE group_id = ? AND week_number = ?
-        ''', (group_id, week_number))
-        
-        existing = cursor.fetchone()
-        
-        if existing:
-            old_msgs, old_avg_length, old_q_count, old_d_count, old_quality = existing
-            
-            new_msgs = old_msgs + 1
-            new_avg_length = (old_avg_length * old_msgs + message_length) / new_msgs
-            new_q_count = old_q_count + (1 if message_type == 'question' else 0)
-            new_d_count = old_d_count + (1 if message_type == 'discussion' else 0)
-            new_quality = (old_quality * old_msgs + quality_score) / new_msgs
-            
-            activity_score = calculate_group_activity_score(new_msgs, unique_participants, new_quality)
-            
-            cursor.execute('''
-                UPDATE group_activity 
-                SET total_messages = ?, unique_participants = ?, avg_message_length = ?,
-                    question_count = ?, discussion_count = ?, activity_score = ?,
-                    discussion_quality_avg = ?, last_activity_time = CURRENT_TIMESTAMP
-                WHERE group_id = ? AND week_number = ?
-            ''', (new_msgs, unique_participants, new_avg_length, new_q_count, new_d_count,
-                  activity_score, new_quality, group_id, week_number))
-        else:
-            activity_score = calculate_group_activity_score(1, unique_participants, quality_score)
-            
-            cursor.execute('''
-                INSERT INTO group_activity 
-                (group_id, week_number, total_messages, unique_participants, 
-                 avg_message_length, question_count, discussion_count, activity_score,
-                 discussion_quality_avg, last_activity_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (group_id, week_number, 1, unique_participants, message_length,
-                  1 if message_type == 'question' else 0,
-                  1 if message_type == 'discussion' else 0,
-                  activity_score, quality_score))
-        
-        conn.commit()
-        conn.close()
-        
-    except Exception as e:
-        print(f"❌ 群組活躍度更新錯誤: {e}")
-
-def calculate_group_activity_score(total_messages, unique_participants, avg_quality):
-    """計算群組活躍度分數"""
-    message_score = min(total_messages * 1.5, 30)
-    participation_score = min(unique_participants * 6, 40)
-    quality_score = (avg_quality or 0) * 6
-    return round(message_score + participation_score + quality_score, 2)
-
-# =============================================================================
-# AI 教學助手功能 - 增強版EMI教學
-# =============================================================================
-
-def generate_ai_response_with_context(user_message, user_name, analysis_result):
-    """根據分析結果生成上下文感知的AI回應"""
-    message_type = analysis_result['message_type']
-    topic_category = analysis_result['topic_category']
-    week_number = analysis_result['week_number']
-    
-    # 根據訊息類型調整回應策略
-    if message_type == 'question':
-        response_style = "provide a clear, educational answer"
-    elif message_type == 'discussion':
-        response_style = "engage thoughtfully and encourage further discussion"
-    elif message_type == 'greeting':
-        response_style = "respond warmly and guide toward course topics"
-    else:
-        response_style = "provide supportive feedback"
-    
-    # 課程週次上下文
-    course_context = get_week_context(week_number)
-    
-    # 根據主題類別提供相關背景
-    topic_context = ""
-    if topic_category != 'General_Discussion':
-        topic_context = f"The student is asking about {topic_category.replace('_', ' ')}. "
-    
-    enhanced_prompt = f"""
-You are an AI Teaching Assistant for "Practical Applications of AI in Life and Learning" (EMI course).
-
-CONTEXT:
-- Student: {user_name}
-- Current Week: {week_number} 
-- Course Topic: {course_context.get('topic', 'General AI Applications')}
-- Message Type: {message_type}
-- Topic Category: {topic_category}
-- {topic_context}
-
-STUDENT MESSAGE: "{user_message}"
-
-RESPONSE STRATEGY: {response_style}
-
-GUIDELINES:
-1. Keep response SHORT (2-3 sentences max)
-2. Primary language: English (EMI course)
-3. Use Traditional Chinese assistance when needed (關鍵術語繁體中文)
-4. Connect to current week's topic when relevant: {course_context.get('keywords', [])}
-5. Encourage critical thinking for discussions
-6. Be supportive and educational
-7. End with "Want to know more?" or "需要更詳細的說明嗎？" when appropriate
-
-Respond appropriately based on the context and analysis.
-"""
-    
-    try:
-        response = model.generate_content(enhanced_prompt)
-        if response.text:
-            return response.text.strip()
-        else:
-            return "I apologize, but I cannot answer this question right now. Please try again later."
-    except Exception as e:
-        print(f"AI Response Error: {e}")
-        return "I'm sorry, the AI assistant is temporarily unavailable. Please try again later."
-
-# =============================================================================
-# 原有功能保持兼容性
-# =============================================================================
-
-def save_interaction(user_id, user_name, message, ai_response):
-    """記錄學生與
+    app.run(host='0.0.0.0', port=port, debug=False)
