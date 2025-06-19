@@ -6,7 +6,6 @@ from flask import Flask, request, abort, render_template_string, jsonify
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from linebot.models import GroupSource
 import random
 
 app = Flask(__name__)
@@ -208,6 +207,14 @@ def generate_ai_response(user_message, user_name):
         ]
         return random.choice(responses)
 
+def is_group_message(event):
+    """檢查是否為群組訊息"""
+    try:
+        # 檢查 source 物件是否有 group_id 屬性
+        return hasattr(event.source, 'group_id') and event.source.group_id is not None
+    except:
+        return False
+
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -234,8 +241,8 @@ def handle_message(event):
             user_name = f"User_{user_id[:8]}"
         
         # 處理群組訊息 - 只有@提到bot才回應
-        is_group_message = hasattr(event.source, 'group_id')
-        if is_group_message:
+        is_group = is_group_message(event)
+        if is_group:
             if not user_message.strip().startswith('@AI'):
                 return
             
@@ -245,7 +252,7 @@ def handle_message(event):
                 user_message = "Hi"
         
         # 🔥 重要：記錄互動數據到資料庫
-        log_interaction(user_id, user_name, user_message, is_group_message)
+        log_interaction(user_id, user_name, user_message, is_group)
         
         # 生成回應
         if user_message.lower() in ['hi', 'hello', 'help', '幫助']:
@@ -700,30 +707,6 @@ def research_dashboard():
                     <h3>🎯 研究關鍵指標</h3>
                     
                     <div style="margin-bottom: 1.5rem;">
-                        <div class="metric-target">週使用率目標：≥70%</div>
-                        <div class="metric-value">{stats['weekly_usage_rate']}%</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: {min(stats['weekly_usage_rate'], 100)}%"></div>
-                        </div>
-                        <span class="status {'achieved' if stats['weekly_usage_rate'] >= 70 else 'not-achieved'}">
-                            {'✅ 已達標' if stats['weekly_usage_rate'] >= 70 else '❌ 未達標'}
-                        </span>
-                    </div>
-                    
-                    <div style="margin-bottom: 1.5rem;">
-                        <div class="metric-target">平均發言次數目標：≥5次/週</div>
-                        <div class="metric-value">{stats['avg_interactions_per_user']} 次</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: {min(stats['avg_interactions_per_user']*20, 100)}%"></div>
-                        </div>
-                        <span class="status {'achieved' if stats['avg_interactions_per_user'] >= 5 else 'not-achieved'}">
-                            {'✅ 已達標' if stats['avg_interactions_per_user'] >= 5 else '❌ 未達標'}
-                        </span>
-                    </div>
-                    
-                    <div>
-                        <div class="metric-target">討論品質平均分：</div>
-                        <div class="metric-value">{stats['avg_quality']} / 5.0</div>
                         <div class="progress-bar">
                             <div class="progress-fill" style="width: {stats['avg_quality']*20}%"></div>
                         </div>
@@ -1049,4 +1032,28 @@ if __name__ == "__main__":
     for rule in app.url_map.iter_rules():
         print(f"  {rule.rule} -> {rule.endpoint}")
     
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)), debug=True)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)), debug=True)="metric-target">週使用率目標：≥70%</div>
+                        <div class="metric-value">{stats['weekly_usage_rate']}%</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: {min(stats['weekly_usage_rate'], 100)}%"></div>
+                        </div>
+                        <span class="status {'achieved' if stats['weekly_usage_rate'] >= 70 else 'not-achieved'}">
+                            {'✅ 已達標' if stats['weekly_usage_rate'] >= 70 else '❌ 未達標'}
+                        </span>
+                    </div>
+                    
+                    <div style="margin-bottom: 1.5rem;">
+                        <div class="metric-target">平均發言次數目標：≥5次/週</div>
+                        <div class="metric-value">{stats['avg_interactions_per_user']} 次</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: {min(stats['avg_interactions_per_user']*20, 100)}%"></div>
+                        </div>
+                        <span class="status {'achieved' if stats['avg_interactions_per_user'] >= 5 else 'not-achieved'}">
+                            {'✅ 已達標' if stats['avg_interactions_per_user'] >= 5 else '❌ 未達標'}
+                        </span>
+                    </div>
+                    
+                    <div>
+                        <div class="metric-target">討論品質平均分：</div>
+                        <div class="metric-value">{stats['avg_quality']} / 5.0</div>
+                        <div class
