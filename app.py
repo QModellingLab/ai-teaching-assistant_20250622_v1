@@ -485,55 +485,6 @@ def research_dashboard():
                     </table>
                 </div>
                 
-                <!-- 主題興趣分析 -->
-                <div class="card">
-                    <h3>📚 討論主題分析</h3>
-                    <table class="table">
-                        <thead>
-                            <tr><th>主題</th><th>提及次數</th><th>平均品質</th><th>問題數</th></tr>
-                        </thead>
-                        <tbody>
-        """
-        
-        for topic in analytics['content_analysis']['topic_stats']:
-            topic_name = topic[0].replace('_', ' ')
-            dashboard_html += f"""
-                            <tr>
-                                <td>{topic_name}</td>
-                                <td>{topic[1]}</td>
-                                <td>{topic[2]:.1f}</td>
-                                <td>{topic[3]}</td>
-                            </tr>
-            """
-        
-        dashboard_html += """
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- 訊息類型分布 -->
-                <div class="card">
-                    <h3>💬 訊息類型分布</h3>
-        """
-        
-        message_types = analytics['content_analysis']['message_type_stats']
-        type_names = {'question': '問題', 'discussion': '討論', 'response': '回應', 'greeting': '問候'}
-        
-        for msg_type, count in message_types.items():
-            percentage = (count / sum(message_types.values())) * 100 if message_types else 0
-            type_name = type_names.get(msg_type, msg_type)
-            dashboard_html += f"""
-                    <div style="margin: 10px 0;">
-                        <strong>{type_name}：</strong> {count} 次 ({percentage:.1f}%)
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: {percentage}%; background-color: #667eea;"></div>
-                        </div>
-                    </div>
-            """
-        
-        dashboard_html += """
-                </div>
-                
                 <!-- 教學改進建議 -->
                 <div class="card" style="grid-column: 1 / -1;">
                     <h3>💡 AI分析建議</h3>
@@ -810,15 +761,10 @@ def health_check():
         total_interactions = cursor.fetchone()[0]
         conn.close()
         
-        # 檢查AI功能
-        test_response = model.generate_content("Hello")
-        ai_working = bool(test_response.text)
-        
         return {
             "status": "healthy",
             "service": "AI Teaching Assistant",
             "total_interactions": total_interactions,
-            "ai_status": "working" if ai_working else "error",
             "timestamp": datetime.now().isoformat()
         }, 200
         
@@ -968,7 +914,7 @@ if __name__ == "__main__":
     # Railway部署設定
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)# app.py - Railway部署版本
-# LINE Bot + Gemini AI 教學助手 (完整研究功能整合版)
+# LINE Bot + Gemini AI 教學助手 (完整研究功能整合版 - 修復版)
 
 import os
 import sqlite3
@@ -1634,6 +1580,4 @@ Respond appropriately based on the context and analysis.
 # =============================================================================
 
 def save_interaction(user_id, user_name, message, ai_response):
-    """記錄學生與AI的互動 (保持原有兼容性)"""
-    try:
-        conn = sqlite3.connect('teaching_bot.db')
+    """記錄學生與
