@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import re
 import json
 from collections import Counter
-import schedule
 import threading
 import time
 from flask import Flask, request, abort, render_template_string, jsonify
@@ -407,7 +406,6 @@ def generate_course_specific_response(user_message, user_name, current_week):
     if current_week in COURSE_SCHEDULE_18_WEEKS:
         week_info = COURSE_SCHEDULE_18_WEEKS[current_week]
         topic = week_info["topic"]
-        focus = week_info["focus"]
         
         # 生成式AI相關（第2週）
         if current_week == 2 and any(term in user_message_lower for term in ["chatgpt", "claude", "generative", "llm"]):
@@ -560,10 +558,10 @@ def handle_message(event):
             TextSendMessage(text=response)
         )
         
-        # 檢查是否需要智能提問
+        # 檢查是否需要智能提問 (簡化版，不使用定時任務)
         if should_trigger_course_intelligent_question(user_id, current_week):
             intelligent_question = generate_weekly_intelligent_question(user_name, current_week)
-            # 延遲發送智能提問
+            # 簡單延遲發送
             def delayed_course_question():
                 time.sleep(300)  # 5分鐘後發送
                 try:
@@ -1153,20 +1151,8 @@ def health_check():
     """健康檢查"""
     return "OK"
 
-# 定時任務
-def setup_course_scheduled_tasks():
-    """設定課程定時任務"""
-    def run_scheduler():
-        while True:
-            schedule.run_pending()
-            time.sleep(60)
-    
-    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-    scheduler_thread.start()
-
 # 初始化
 init_database()
-setup_course_scheduled_tasks()
 
 # Gunicorn 應用物件
 application = app
