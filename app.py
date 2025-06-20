@@ -1,782 +1,4 @@
-<div class="form-group">
-                    <label>學生ID:</label>
-                    <input type="text" name="user_id" value="student001" required>
-                </div>
-                
-                <div class="form-group">
-                    <label>訊息內容:</label>
-                    <textarea name="message" rows="4" placeholder="例如: What is artificial intelligence?" required></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="is_group"> 群組互動 (模擬@AI呼叫)
-                    </label>
-                </div>
-                
-                <button type="submit">模擬互動</button>
-            </form>
-            
-            <div style="margin-top: 30px; text-align: center;">
-                <a href="/" style="color: #007bff; margin: 0 10px;">回到首頁</a>
-                <a href="/research_dashboard" style="color: #007bff; margin: 0 10px;">查看數據</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    '''
-
-@app.route("/student_list")
-def student_list():
-    """學生列表"""
-    try:
-        if not ensure_db_exists():
-            return '''
-            <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-                <h2>資料庫錯誤</h2>
-                <p>資料庫初始化失敗，請聯繫系統管理員。</p>
-                <a href="/" style="color: #007bff;">回到首頁</a>
-            </div>
-            '''
-            
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT u.user_id, u.user_name, COUNT(i.id) as total_interactions,
-                   AVG(i.quality_score) as avg_quality, MAX(i.created_at) as last_activity
-            FROM users u
-            LEFT JOIN interactions i ON u.user_id = i.user_id
-            GROUP BY u.user_id, u.user_name
-            ORDER BY total_interactions DESC
-        ''')
-        
-        students = cursor.fetchall()
-        conn.close()
-        
-        html = '''
-        <!DOCTYPE html>
-        <html lang="zh-TW">
-        <head>
-            <meta charset="UTF-8">
-            <title>學生個人分析列表</title>
-            <style>
-                body { font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }
-                .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
-                table { width: 100%; border-collapse: collapse; }
-                th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
-                th { background: #f8f9fa; font-weight: bold; }
-                tr:hover { background: #f8f9fa; }
-                .btn { padding: 6px 12px; background: #007bff; color: white; text-decoration: none; border-radius: 3px; }
-                .status { display: inline-block; padding: 4px 8px; border-radius: 12px; font-size: 0.8em; color: white; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>學生個人分析系統</h1>
-                <p>AI在生活與學習上的實務應用課程</p>
-                
-                <h2>學生個人分析列表</h2>
-                <table>
-                    <tr>
-                        <th>學生姓名</th>
-                        <th>互動次數</th>
-                        <th>平均品質</th>
-                        <th>最後活動</th>
-                        <th>狀態</th>
-                        <th>操作</th>
-                    </tr>
-        '''
-        
-        for student in students:
-            user_id, user_name, interactions, quality, last_activity = student
-            interactions = interactions or 0
-            quality = quality or 0
-            
-            if interactions >= 10:
-                status = "活躍"
-                status_color = "#28a745"
-            elif interactions >= 5:
-                status = "正常"
-                status_color = "#ffc107"
-            elif interactions >= 1:
-                status = "較少"
-                status_color = "#fd7e14"
-            else:
-                status = "無互動"
-                status_color = "#dc3545"
-            
-            if last_activity:
-                try:
-                    last_date = datetime.fromisoformat(last_activity).strftime('%m/%d')
-                except:
-                    last_date = "未知"
-            else:
-                last_date = "無記錄"
-            
-            html += f'''
-                <tr>
-                    <td><strong>{user_name}</strong></td>
-                    <td>{interactions}</td>
-                    <td>{quality:.2f}</td>
-                    <td>{last_date}</td>
-                    <td><span class="status" style="background: {status_color};">{status}</span></td>
-                    <td><a href="/student_analysis/{user_id}" class="btn">詳細分析</a></td>
-                </tr>
-            '''
-        
-        if not students:
-            html += '<tr><td colspan="6" style="text-align: center;">暫無學生數據</td></tr>'
-        
-        html += '''
-                </table>
-                <div style="text-align: center; margin-top: 30px;">
-                    <a href="/" style="color: #007bff; margin: 0 10px;">回到首頁</a>
-                    <a href="/class_analysis" style="color: #007bff; margin: 0 10px;">班級分析</a>
-                </div>
-            </div>
-        </body>
-        </html>
-        '''
-        
-        return html
-        
-        return f"匯出錯誤: {e}"
-
-@app.route("/setup_guide")
-def setup_guide():
-    """設定指南"""
-    return '''
-    <!DOCTYPE html>
-    <html lang="zh-TW">
-    <head>
-        <meta charset="UTF-8">
-        <title>LINE Bot 設定指南</title>
-        <style>
-            body { font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }
-            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
-            .step { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #007bff; }
-            code { background: #f1f1f1; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>LINE Bot 設定指南</h1>
-            
-            <div class="step">
-                <h3>步驟 1: 建立 LINE Bot</h3>
-                <p>1. 前往 LINE Developers (https://developers.line.biz/)</p>
-                <p>2. 建立新的 Channel（Messaging API）</p>
-                <p>3. 取得 Channel Access Token 和 Channel Secret</p>
-            </div>
-            
-            <div class="step">
-                <h3>步驟 2: 設定 Railway 環境變數</h3>
-                <p>在 Railway 專案的 Variables 頁面設定：</p>
-                <p><code>CHANNEL_ACCESS_TOKEN</code> = 您的 Channel Access Token</p>
-                <p><code>CHANNEL_SECRET</code> = 您的 Channel Secret</p>
-            </div>
-            
-            <div class="step">
-                <h3>步驟 3: 設定 Webhook</h3>
-                <p>在 LINE Bot 設定中設定 Webhook URL：</p>
-                <p><code>https://your-railway-domain.up.railway.app/callback</code></p>
-            </div>
-            
-            <div style="text-align: center; margin-top: 30px;">
-                <a href="/" style="color: #007bff;">返回首頁</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    '''
-
-@app.route("/health")
-def health_check():
-    """健康檢查"""
-    db_status = ensure_db_exists()
-    
-    return jsonify({
-        "status": "healthy" if db_status else "database_error",
-        "timestamp": datetime.now().isoformat(),
-        "system": "AI課程分析系統 v2.0",
-        "line_bot_configured": line_bot_api is not None,
-        "database_status": "connected" if db_status else "failed"
-    })
-
-@app.route("/init_db_manually")
-def init_db_manually():
-    """手動初始化資料庫"""
-    try:
-        success = init_db()
-        if success:
-            return '''
-            <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-                <h2>資料庫初始化成功</h2>
-                <p>資料庫和示範數據已成功創建。</p>
-                <a href="/" style="color: #007bff;">回到首頁</a> |
-                <a href="/student_list" style="color: #007bff;">查看學生列表</a>
-            </div>
-            '''
-        else:
-            return '''
-            <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-                <h2>資料庫初始化失敗</h2>
-                <p>請檢查系統日誌或聯繫技術支援。</p>
-                <a href="/" style="color: #007bff;">回到首頁</a>
-            </div>
-            '''
-    except Exception as e:
-        return f'''
-        <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-            <h2>初始化錯誤</h2>
-            <p>錯誤訊息：{e}</p>
-            <a href="/" style="color: #007bff;">回到首頁</a>
-        </div>
-        '''
-
-@app.route("/test_db")
-def test_db():
-    """測試資料庫連接"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 測試查詢
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = cursor.fetchall()
-        
-        cursor.execute("SELECT COUNT(*) FROM users")
-        user_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM interactions")
-        interaction_count = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        return f'''
-        <div style="font-family: Microsoft JhengHei; margin: 20px; padding: 20px; background: white; border-radius: 10px;">
-            <h2>資料庫連接測試</h2>
-            <p><strong>狀態:</strong> 連接成功</p>
-            <p><strong>表格:</strong> {[table[0] for table in tables]}</p>
-            <p><strong>用戶數量:</strong> {user_count}</p>
-            <p><strong>互動記錄:</strong> {interaction_count}</p>
-            <a href="/" style="color: #007bff;">回到首頁</a>
-        </div>
-        '''
-        
-    except Exception as e:
-        return f'''
-        <div style="font-family: Microsoft JhengHei; margin: 20px; padding: 20px; background: white; border-radius: 10px;">
-            <h2>資料庫連接測試</h2>
-            <p><strong>狀態:</strong> 連接失敗</p>
-            <p><strong>錯誤:</strong> {e}</p>
-            <a href="/init_db_manually" style="color: #007bff;">手動初始化</a> |
-            <a href="/" style="color: #007bff;">回到首頁</a>
-        </div>
-        '''
-
-@app.errorhandler(404)
-def not_found(error):
-    return '''
-    <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-        <h2>頁面未找到</h2>
-        <p>您要查找的頁面不存在。</p>
-        <a href="/" style="color: #007bff;">回到首頁</a>
-    </div>
-    ''', 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return '''
-    <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-        <h2>系統錯誤</h2>
-        <p>系統發生錯誤，請稍後再試。</p>
-        <a href="/" style="color: #007bff;">回到首頁</a> |
-        <a href="/test_db" style="color: #007bff;">測試資料庫</a>
-    </div>
-    ''', 500
-
-# 啟動時強制初始化資料庫
-@app.before_first_request
-def initialize_database():
-    """應用啟動時初始化資料庫"""
-    print("Initializing database on startup...")
-    init_db()
-
-if __name__ == "__main__":
-    print("=== AI課程分析系統啟動 ===")
-    print("正在初始化資料庫...")
-    init_db()
-    
-    port = int(os.environ.get('PORT', 5000))
-    print(f"啟動應用於 port {port}")
-    print(f"LINE Bot 狀態: {'已配置' if line_bot_api else '未配置'}")
-    print("=== 系統準備就緒 ===")
-    
-    app.run(host='0.0.0.0', port=port, debug=False)
-
-# Gunicorn 兼容性
-application = app
-        return f"學生列表錯誤: {e}"
-
-@app.route("/student_analysis/<user_id>")
-def student_analysis(user_id):
-    """個人分析頁面"""
-    analysis = get_individual_student_analysis(user_id)
-    
-    if not analysis or not analysis.get('analysis_available'):
-        return '''
-        <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-            <h2>個人學習分析</h2>
-            <p>此學生暫無足夠的互動數據進行分析。</p>
-            <a href="/student_list" style="color: #007bff;">返回學生列表</a>
-        </div>
-        '''
-    
-    return f'''
-    <!DOCTYPE html>
-    <html lang="zh-TW">
-    <head>
-        <meta charset="UTF-8">
-        <title>{analysis['user_name']} - 個人學習分析</title>
-        <style>
-            body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
-            .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
-            .header {{ text-align: center; margin-bottom: 30px; color: #333; }}
-            .section {{ margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; }}
-            .metric {{ display: flex; justify-content: space-between; margin: 10px 0; }}
-            .value {{ font-weight: bold; color: #007bff; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>{analysis['user_name']} 個人學習分析</h1>
-                <p>分析日期：{analysis['analysis_date']} | 學習期間：{analysis['study_period_days']} 天</p>
-                <p><strong>綜合表現：{analysis['overall_assessment']['performance_level']} ({analysis['overall_assessment']['overall_score']}/10)</strong></p>
-            </div>
-            
-            <div class="section">
-                <h3>參與度分析</h3>
-                <div class="metric">
-                    <span>總互動次數</span>
-                    <span class="value">{analysis['participation']['total_interactions']}</span>
-                </div>
-                <div class="metric">
-                    <span>活躍天數</span>
-                    <span class="value">{analysis['participation']['active_days']} 天</span>
-                </div>
-                <div class="metric">
-                    <span>週平均活動</span>
-                    <span class="value">{analysis['participation']['avg_weekly_activity']}</span>
-                </div>
-                <div class="metric">
-                    <span>參與度等級</span>
-                    <span class="value" style="color: {analysis['participation']['level_color']};">{analysis['participation']['participation_level']}</span>
-                </div>
-                <div class="metric">
-                    <span>學習一致性</span>
-                    <span class="value">{analysis['participation']['consistency_score']}%</span>
-                </div>
-            </div>
-            
-            <div class="section">
-                <h3>討論品質分析</h3>
-                <div class="metric">
-                    <span>平均品質分數</span>
-                    <span class="value">{analysis['quality']['avg_quality']}/5.0</span>
-                </div>
-                <div class="metric">
-                    <span>高品質討論次數</span>
-                    <span class="value">{analysis['quality']['high_quality_count']} 次</span>
-                </div>
-                <div class="metric">
-                    <span>品質趨勢</span>
-                    <span class="value">{analysis['quality']['quality_trend']}</span>
-                </div>
-            </div>
-            
-            <div class="section">
-                <h3>英語使用分析</h3>
-                <div class="metric">
-                    <span>平均英語使用比例</span>
-                    <span class="value">{analysis['english_usage']['avg_english_ratio']:.1%}</span>
-                </div>
-                <div class="metric">
-                    <span>雙語能力評估</span>
-                    <span class="value">{analysis['english_usage']['bilingual_ability']}</span>
-                </div>
-            </div>
-            
-            <div class="section">
-                <h3>提問行為分析</h3>
-                <div class="metric">
-                    <span>總提問次數</span>
-                    <span class="value">{analysis['questioning']['total_questions']}</span>
-                </div>
-                <div class="metric">
-                    <span>提問比例</span>
-                    <span class="value">{analysis['questioning']['question_ratio']:.1%}</span>
-                </div>
-                <div class="metric">
-                    <span>提問模式</span>
-                    <span class="value">{analysis['questioning']['questioning_pattern']}</span>
-                </div>
-            </div>
-            
-            <div class="section">
-                <h3>學習風格與建議</h3>
-                <p><strong>學習風格：</strong>{analysis['overall_assessment']['learning_style']}</p>
-                <p><strong>主要優勢：</strong>{', '.join(analysis['overall_assessment']['strengths'])}</p>
-                <p><strong>改進建議：</strong>{', '.join(analysis['overall_assessment']['improvement_suggestions'])}</p>
-            </div>
-            
-            <div style="text-align: center; margin-top: 30px;">
-                <a href="/student_list" style="color: #007bff; margin: 0 10px;">返回學生列表</a>
-                <a href="/class_analysis" style="color: #007bff; margin: 0 10px;">班級分析</a>
-                <a href="/" style="color: #007bff; margin: 0 10px;">回到首頁</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    '''
-
-@app.route("/class_analysis")
-def class_analysis():
-    """班級分析頁面"""
-    try:
-        if not ensure_db_exists():
-            return '''
-            <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-                <h2>資料庫錯誤</h2>
-                <p>資料庫初始化失敗，請聯繫系統管理員。</p>
-                <a href="/" style="color: #007bff;">回到首頁</a>
-            </div>
-            '''
-            
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT COUNT(DISTINCT u.user_id) as total_students,
-                   COUNT(DISTINCT CASE WHEN i.id IS NOT NULL THEN u.user_id END) as active_students,
-                   AVG(i.quality_score) as avg_quality,
-                   AVG(i.english_ratio) as avg_english,
-                   COUNT(i.id) as total_interactions
-            FROM users u
-            LEFT JOIN interactions i ON u.user_id = i.user_id
-        ''')
-        
-        stats = cursor.fetchone()
-        
-        cursor.execute('''
-            SELECT u.user_name, COUNT(i.id) as interactions,
-                   AVG(i.quality_score) as avg_quality,
-                   AVG(i.english_ratio) as avg_english
-            FROM users u
-            LEFT JOIN interactions i ON u.user_id = i.user_id
-            GROUP BY u.user_id, u.user_name
-            ORDER BY interactions DESC
-            LIMIT 10
-        ''')
-        
-        rankings = cursor.fetchall()
-        conn.close()
-        
-        total_students, active_students, avg_quality, avg_english, total_interactions = stats
-        participation_rate = (active_students / total_students * 100) if total_students > 0 else 0
-        
-        ranking_html = ""
-        for i, (name, interactions, quality, english) in enumerate(rankings, 1):
-            rank_color = "#ffd700" if i <= 3 else "#c0c0c0" if i <= 5 else "#cd7f32"
-            ranking_html += f'''
-                <tr>
-                    <td style="background: {rank_color}; color: white; font-weight: bold; text-align: center;">{i}</td>
-                    <td><strong>{name}</strong></td>
-                    <td>{interactions or 0}</td>
-                    <td>{quality:.2f if quality else 0}</td>
-                    <td>{english:.1%} if english else 0%</td>
-                </tr>
-            '''
-        
-        suggestions = []
-        if participation_rate < 70:
-            suggestions.append("班級參與率偏低，建議增加互動式活動")
-        if avg_quality and avg_quality < 3.0:
-            suggestions.append("整體討論品質需要提升")
-        if avg_english and avg_english < 0.4:
-            suggestions.append("英語使用比例偏低，建議設計更多英語活動")
-        
-        if not suggestions:
-            suggestions.append("班級整體表現良好，繼續保持")
-        
-        suggestions_html = ""
-        for suggestion in suggestions:
-            suggestions_html += f"<p>{suggestion}</p>"
-        
-        return f'''
-        <!DOCTYPE html>
-        <html lang="zh-TW">
-        <head>
-            <meta charset="UTF-8">
-            <title>班級整體分析報告</title>
-            <style>
-                body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
-                .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
-                .header {{ text-align: center; margin-bottom: 30px; color: #333; }}
-                .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }}
-                .stat-card {{ background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; }}
-                .stat-value {{ font-size: 2em; font-weight: bold; color: #007bff; }}
-                table {{ width: 100%; border-collapse: collapse; }}
-                th, td {{ padding: 12px; border: 1px solid #ddd; text-align: left; }}
-                th {{ background: #f8f9fa; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>AI實務應用課程 - 班級整體分析</h1>
-                    <p>分析時間：{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
-                </div>
-                
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-value">{total_students or 0}</div>
-                        <div>班級總人數</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">{active_students or 0}</div>
-                        <div>活躍學生數</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">{participation_rate:.1f}%</div>
-                        <div>參與率</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">{avg_quality:.2f if avg_quality else 0}</div>
-                        <div>平均討論品質</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">{avg_english:.1%} if avg_english else 0%</div>
-                        <div>平均英語使用</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">{total_interactions or 0}</div>
-                        <div>總互動次數</div>
-                    </div>
-                </div>
-                
-                <div style="margin: 30px 0;">
-                    <h2>學生表現排行榜 (Top 10)</h2>
-                    <table>
-                        <tr>
-                            <th>排名</th>
-                            <th>學生姓名</th>
-                            <th>互動次數</th>
-                            <th>平均品質</th>
-                            <th>英語使用比例</th>
-                        </tr>
-                        {ranking_html}
-                    </table>
-                </div>
-                
-                <div style="margin: 30px 0;">
-                    <h2>教學改進建議</h2>
-                    <div style="background: #d4edda; padding: 20px; border-radius: 8px; border-left: 4px solid #28a745;">
-                        {suggestions_html}
-                    </div>
-                </div>
-                
-                <div style="text-align: center; margin-top: 30px;">
-                    <a href="/" style="color: #007bff; margin: 0 10px;">回到首頁</a>
-                    <a href="/student_list" style="color: #007bff; margin: 0 10px;">學生列表</a>
-                    <a href="/research_dashboard" style="color: #007bff; margin: 0 10px;">研究數據</a>
-                </div>
-            </div>
-        </body>
-        </html>
-        '''
-        
-    except Exception as e:
-        return f"班級分析錯誤: {e}"
-
-@app.route("/research_dashboard")
-def research_dashboard():
-    """研究儀表板"""
-    try:
-        if not ensure_db_exists():
-            return '''
-            <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
-                <h2>資料庫錯誤</h2>
-                <p>資料庫初始化失敗，請聯繫系統管理員。</p>
-                <a href="/" style="color: #007bff;">回到首頁</a>
-            </div>
-            '''
-            
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT COUNT(*) FROM interactions')
-        total_interactions = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM interactions')
-        active_students = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(*) FROM interactions WHERE date(created_at) = date("now")')
-        today_usage = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT AVG(quality_score) FROM interactions WHERE quality_score > 0')
-        avg_quality = cursor.fetchone()[0] or 0
-        
-        cursor.execute('SELECT AVG(english_ratio) FROM interactions WHERE english_ratio IS NOT NULL')
-        avg_english = cursor.fetchone()[0] or 0
-        
-        cursor.execute('SELECT COUNT(*) FROM interactions WHERE date(created_at) >= date("now", "-7 days")')
-        week_interactions = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM users')
-        total_users = cursor.fetchone()[0]
-        
-        week_usage_rate = (week_interactions / max(total_users * 5, 1)) * 100
-        avg_weekly_messages = week_interactions / max(active_students, 1) if active_students > 0 else 0
-        
-        conn.close()
-        
-        return f'''
-        <!DOCTYPE html>
-        <html lang="zh-TW">
-        <head>
-            <meta charset="UTF-8">
-            <title>EMI教學研究數據儀表板</title>
-            <style>
-                body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
-                .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
-                .header {{ text-align: center; margin-bottom: 30px; color: #333; }}
-                .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }}
-                .metric-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 15px; text-align: center; }}
-                .metric-value {{ font-size: 2.5em; font-weight: bold; margin-bottom: 10px; }}
-                .metric-label {{ font-size: 1.1em; opacity: 0.9; }}
-                .status {{ background: #28a745; color: white; padding: 8px 16px; border-radius: 20px; display: inline-block; margin-top: 20px; }}
-                .research-section {{ margin: 40px 0; padding: 30px; background: #f8f9fa; border-radius: 10px; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>EMI教學研究數據儀表板</h1>
-                    <p>AI在生活與學習上的實務應用 - 教學實踐研究</p>
-                    <span class="status">系統正常運行</span>
-                </div>
-                
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-value">{total_interactions}</div>
-                        <div class="metric-label">總互動次數</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{active_students}</div>
-                        <div class="metric-label">活躍學生數</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{today_usage}</div>
-                        <div class="metric-label">今日使用量</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{week_usage_rate:.1f}%</div>
-                        <div class="metric-label">週使用率</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{avg_weekly_messages:.1f}</div>
-                        <div class="metric-label">平均發言次數/週</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{avg_quality:.1f}/5.0</div>
-                        <div class="metric-label">討論品質平均分</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{avg_english:.1%}</div>
-                        <div class="metric-label">英語使用比例</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">第{get_current_week()}週</div>
-                        <div class="metric-label">當前課程進度</div>
-                    </div>
-                </div>
-                
-                <div class="research-section">
-                    <h2>114年度教學實踐研究計畫</h2>
-                    <h3>生成式AI輔助的雙語教學創新：提升EMI課程學生參與度與跨文化能力</h3>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px;">
-                        <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
-                            <h4>研究目標追蹤</h4>
-                            <p><strong>目標 1:</strong> 週使用率 >= 70% (目前: {week_usage_rate:.1f}%)</p>
-                            <p><strong>目標 2:</strong> 平均發言次數 >= 5次/週 (目前: {avg_weekly_messages:.1f}次)</p>
-                            <p><strong>目標 3:</strong> 討論品質 >= 3.5分 (目前: {avg_quality:.1f}分)</p>
-                            <p><strong>目標 4:</strong> 英語使用率 >= 50% (目前: {avg_english:.1%})</p>
-                        </div>
-                        
-                        <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #28a745;">
-                            <h4>研究方法</h4>
-                            <p>• 量化分析：學生參與度、討論品質統計</p>
-                            <p>• 質性分析：學習行為模式、跨文化能力</p>
-                            <p>• 混合研究：AI輔助教學效果評估</p>
-                            <p>• 縱向研究：18週學習歷程追蹤</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <div style="text-align: center; margin-top: 40px;">
-                    <h2>研究數據匯出</h2>
-                    <p>支援教學實踐研究報告撰寫和學術論文發表</p>
-                    <div style="margin-top: 20px;">
-                        <a href="/export_research_data" style="padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">匯出完整數據 (CSV)</a>
-                        <a href="/student_list" style="padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">個人分析報告</a>
-                        <a href="/class_analysis" style="padding: 12px 24px; background: #17a2b8; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">班級整體報告</a>
-                    </div>
-                </div>
-            </div>
-        </body>
-        </html>
-        '''
-        
-    except Exception as e:
-        return f"研究儀表板錯誤: {e}"
-
-@app.route("/export_research_data")
-def export_research_data():
-    """匯出研究數據"""
-    try:
-        if not ensure_db_exists():
-            return "資料庫錯誤：無法匯出數據"
-            
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT u.user_name, i.created_at, i.content, i.message_type,
-                   i.quality_score, i.english_ratio, i.contains_keywords, i.group_id
-            FROM users u
-            JOIN interactions i ON u.user_id = i.user_id
-            ORDER BY i.created_at
-        ''')
-        
-        data = cursor.fetchall()
-        conn.close()
-        
-        csv_content = "學生姓名,時間,內容,訊息類型,品質分數,英語比例,包含關鍵詞,群組互動\n"
-        for row in data:
-            content_preview = row[2][:50].replace('"', '""') if row[2] else ""
-            csv_content += f'"{row[0]}","{row[1]}","{content_preview}...","{row[3]}",{row[4] or 0},{row[5] or 0},{row[6] or 0},"{row[7] or ""}"\n'
-        
-        return Response(
-            csv_content,
-            mimetype="text/csv",
-            headers={"Content-disposition": "attachment; filename=ai_course_research_data.csv"}
-        )
-        
-    except Exception as e:from flask import Flask, request, abort, jsonify, Response
+from flask import Flask, request, abort, jsonify, Response
 import os
 import sqlite3
 import json
@@ -786,11 +8,10 @@ import re
 
 app = Flask(__name__)
 
-# LINE Bot 設定 - 安全檢查
+# LINE Bot 設定
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 
-# 只有在環境變數存在時才初始化 LINE Bot
 line_bot_api = None
 handler = None
 
@@ -808,7 +29,7 @@ if CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET:
         line_bot_api = None
         handler = None
 else:
-    print("LINE Bot environment variables not set, web-only mode enabled")
+    print("LINE Bot environment variables not set")
 
 # 18週課程設定
 COURSE_SCHEDULE_18_WEEKS = {
@@ -842,24 +63,21 @@ def get_current_week():
 
 def get_db_connection():
     """建立資料庫連接"""
-    # 使用絕對路徑，確保資料庫檔案位置正確
     db_path = os.path.join(os.getcwd(), 'course_data.db')
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    """強化版資料庫初始化"""
+    """初始化資料庫"""
     try:
         print("Starting database initialization...")
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 強制刪除現有表格（如果存在）
         cursor.execute('DROP TABLE IF EXISTS interactions')
         cursor.execute('DROP TABLE IF EXISTS users')
         
-        # 創建用戶表格
         cursor.execute('''
             CREATE TABLE users (
                 user_id TEXT PRIMARY KEY,
@@ -867,9 +85,7 @@ def init_db():
                 first_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        print("Users table created successfully")
         
-        # 創建互動表格
         cursor.execute('''
             CREATE TABLE interactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -886,22 +102,12 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         ''')
-        print("Interactions table created successfully")
         
-        # 立即提交
         conn.commit()
-        
-        # 驗證表格是否創建成功
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = cursor.fetchall()
-        print(f"Tables created: {[table[0] for table in tables]}")
-        
         conn.close()
-        print("Database initialization completed successfully")
+        print("Database initialization completed")
         
-        # 創建示範數據
         create_demo_data()
-        
         return True
         
     except Exception as e:
@@ -911,18 +117,14 @@ def init_db():
 def create_demo_data():
     """創建示範數據"""
     try:
-        print("Creating demo data...")
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 檢查是否已有數據
         cursor.execute('SELECT COUNT(*) FROM users')
         if cursor.fetchone()[0] > 0:
-            print("Demo data already exists")
             conn.close()
             return
         
-        # 創建示範學生
         demo_students = [
             ('student001', 'York Chen'),
             ('student002', 'Alice Wang'),
@@ -933,18 +135,16 @@ def create_demo_data():
         
         for user_id, user_name in demo_students:
             cursor.execute('INSERT INTO users (user_id, user_name) VALUES (?, ?)', (user_id, user_name))
-            print(f"Added student: {user_name}")
         
-        # 創建示範互動數據
         demo_interactions = [
-            ('student001', 'York Chen', 'What is artificial intelligence?', 'AI response about AI fundamentals...', 'question', 4.2, 0.85, 1, None),
-            ('student001', 'York Chen', '我覺得AI在教育很有用', 'AI response about educational applications...', 'discussion', 3.8, 0.3, 1, 'group'),
-            ('student002', 'Alice Wang', 'How does machine learning work?', 'AI response about ML concepts...', 'question', 4.5, 0.9, 1, None),
-            ('student003', 'Bob Lin', 'AI ethics is important for society', 'AI response about ethics...', 'discussion', 3.5, 0.7, 1, 'group'),
-            ('student004', 'Catherine Liu', '生成式AI的應用很廣泛', 'AI response about generative AI...', 'response', 3.2, 0.2, 1, None),
-            ('student002', 'Alice Wang', 'Can AI replace human creativity?', 'AI response about creativity...', 'question', 4.0, 0.8, 1, None),
-            ('student003', 'Bob Lin', 'Industry 4.0 needs AI integration', 'AI response about Industry 4.0...', 'discussion', 3.8, 0.75, 1, 'group'),
-            ('student005', 'David Chang', 'AI工具幫助學習效率', 'AI response about learning tools...', 'response', 3.0, 0.25, 1, None),
+            ('student001', 'York Chen', 'What is artificial intelligence?', 'AI response...', 'question', 4.2, 0.85, 1, None),
+            ('student001', 'York Chen', '我覺得AI在教育很有用', 'AI response...', 'discussion', 3.8, 0.3, 1, 'group'),
+            ('student002', 'Alice Wang', 'How does machine learning work?', 'AI response...', 'question', 4.5, 0.9, 1, None),
+            ('student003', 'Bob Lin', 'AI ethics is important for society', 'AI response...', 'discussion', 3.5, 0.7, 1, 'group'),
+            ('student004', 'Catherine Liu', '生成式AI的應用很廣泛', 'AI response...', 'response', 3.2, 0.2, 1, None),
+            ('student002', 'Alice Wang', 'Can AI replace human creativity?', 'AI response...', 'question', 4.0, 0.8, 1, None),
+            ('student003', 'Bob Lin', 'Industry 4.0 needs AI integration', 'AI response...', 'discussion', 3.8, 0.75, 1, 'group'),
+            ('student005', 'David Chang', 'AI工具幫助學習效率', 'AI response...', 'response', 3.0, 0.25, 1, None),
         ]
         
         for interaction in demo_interactions:
@@ -956,36 +156,26 @@ def create_demo_data():
             ''', interaction)
         
         conn.commit()
-        
-        # 驗證數據是否創建成功
-        cursor.execute('SELECT COUNT(*) FROM users')
-        user_count = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM interactions')
-        interaction_count = cursor.fetchone()[0]
-        
-        print(f"Demo data created: {user_count} users, {interaction_count} interactions")
         conn.close()
+        print("Demo data created successfully")
         
     except Exception as e:
         print(f"Demo data creation failed: {e}")
 
 def ensure_db_exists():
-    """確保資料庫存在並可用"""
+    """確保資料庫存在"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 檢查表格是否存在
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
         if not cursor.fetchone():
             conn.close()
-            print("Database tables not found, reinitializing...")
             return init_db()
         
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='interactions'")
         if not cursor.fetchone():
             conn.close()
-            print("Interactions table not found, reinitializing...")
             return init_db()
         
         conn.close()
@@ -1036,7 +226,6 @@ def log_interaction(user_id, user_name, content, ai_response, is_group=False):
     """記錄互動到資料庫"""
     try:
         if not ensure_db_exists():
-            print("Database not available, cannot log interaction")
             return False
             
         conn = get_db_connection()
@@ -1060,7 +249,7 @@ def log_interaction(user_id, user_name, content, ai_response, is_group=False):
         
         conn.commit()
         conn.close()
-        print(f"Interaction logged: {user_name}, Quality: {quality_score}")
+        print(f"Interaction logged: {user_name}")
         return True
         
     except Exception as e:
@@ -1303,8 +492,6 @@ def analyze_individual_performance(interactions, user_name, user_id):
 def home():
     """首頁"""
     line_bot_status = "已配置" if line_bot_api else "未配置"
-    
-    # 檢查資料庫狀態
     db_status = "正常" if ensure_db_exists() else "異常"
     
     return f'''
@@ -1424,3 +611,613 @@ def simulate_interaction():
                 
                 <div class="form-group">
                     <label>學生ID:</label>
+                    <input type="text" name="user_id" value="student001" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>訊息內容:</label>
+                    <textarea name="message" rows="4" placeholder="例如: What is artificial intelligence?" required></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="is_group"> 群組互動 (模擬@AI呼叫)
+                    </label>
+                </div>
+                
+                <button type="submit">模擬互動</button>
+            </form>
+            
+            <div style="margin-top: 30px; text-align: center;">
+                <a href="/" style="color: #007bff; margin: 0 10px;">回到首頁</a>
+                <a href="/research_dashboard" style="color: #007bff; margin: 0 10px;">查看數據</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+
+@app.route("/student_list")
+def student_list():
+    """學生列表"""
+    try:
+        if not ensure_db_exists():
+            return '''
+            <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
+                <h2>資料庫錯誤</h2>
+                <p>資料庫初始化失敗</p>
+                <a href="/" style="color: #007bff;">回到首頁</a>
+            </div>
+            '''
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT u.user_id, u.user_name, COUNT(i.id) as total_interactions,
+                   AVG(i.quality_score) as avg_quality, MAX(i.created_at) as last_activity
+            FROM users u
+            LEFT JOIN interactions i ON u.user_id = i.user_id
+            GROUP BY u.user_id, u.user_name
+            ORDER BY total_interactions DESC
+        ''')
+        
+        students = cursor.fetchall()
+        conn.close()
+        
+        student_rows = ""
+        for student in students:
+            user_id, user_name, interactions, quality, last_activity = student
+            interactions = interactions or 0
+            quality = quality or 0
+            
+            if interactions >= 5:
+                status = "活躍"
+                status_color = "#28a745"
+            elif interactions >= 1:
+                status = "正常"
+                status_color = "#ffc107"
+            else:
+                status = "無互動"
+                status_color = "#dc3545"
+            
+            last_date = "今日" if last_activity else "無記錄"
+            
+            student_rows += f'''
+                <tr>
+                    <td><strong>{user_name}</strong></td>
+                    <td>{interactions}</td>
+                    <td>{quality:.2f}</td>
+                    <td>{last_date}</td>
+                    <td><span style="background: {status_color}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8em;">{status}</span></td>
+                    <td><a href="/student_analysis/{user_id}" style="padding: 6px 12px; background: #007bff; color: white; text-decoration: none; border-radius: 3px;">詳細分析</a></td>
+                </tr>
+            '''
+        
+        return f'''
+        <!DOCTYPE html>
+        <html lang="zh-TW">
+        <head>
+            <meta charset="UTF-8">
+            <title>學生個人分析列表</title>
+            <style>
+                body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
+                .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+                table {{ width: 100%; border-collapse: collapse; }}
+                th, td {{ padding: 12px; border: 1px solid #ddd; text-align: left; }}
+                th {{ background: #f8f9fa; font-weight: bold; }}
+                tr:hover {{ background: #f8f9fa; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>學生個人分析系統</h1>
+                <p>AI在生活與學習上的實務應用課程</p>
+                
+                <table>
+                    <tr>
+                        <th>學生姓名</th>
+                        <th>互動次數</th>
+                        <th>平均品質</th>
+                        <th>最後活動</th>
+                        <th>狀態</th>
+                        <th>操作</th>
+                    </tr>
+                    {student_rows}
+                </table>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                    <a href="/" style="color: #007bff; margin: 0 10px;">回到首頁</a>
+                    <a href="/class_analysis" style="color: #007bff; margin: 0 10px;">班級分析</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+        
+    except Exception as e:
+        return f"學生列表錯誤: {e}"
+
+@app.route("/student_analysis/<user_id>")
+def student_analysis(user_id):
+    """個人分析頁面"""
+    analysis = get_individual_student_analysis(user_id)
+    
+    if not analysis or not analysis.get('analysis_available'):
+        return '''
+        <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
+            <h2>個人學習分析</h2>
+            <p>此學生暫無足夠的互動數據進行分析</p>
+            <a href="/student_list" style="color: #007bff;">返回學生列表</a>
+        </div>
+        '''
+    
+    return f'''
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <title>{analysis['user_name']} - 個人學習分析</title>
+        <style>
+            body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
+            .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+            .header {{ text-align: center; margin-bottom: 30px; color: #333; }}
+            .section {{ margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; }}
+            .metric {{ display: flex; justify-content: space-between; margin: 10px 0; }}
+            .value {{ font-weight: bold; color: #007bff; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>{analysis['user_name']} 個人學習分析</h1>
+                <p>分析日期：{analysis['analysis_date']} | 學習期間：{analysis['study_period_days']} 天</p>
+                <p><strong>綜合表現：{analysis['overall_assessment']['performance_level']} ({analysis['overall_assessment']['overall_score']}/10)</strong></p>
+            </div>
+            
+            <div class="section">
+                <h3>參與度分析</h3>
+                <div class="metric">
+                    <span>總互動次數</span>
+                    <span class="value">{analysis['participation']['total_interactions']}</span>
+                </div>
+                <div class="metric">
+                    <span>活躍天數</span>
+                    <span class="value">{analysis['participation']['active_days']} 天</span>
+                </div>
+                <div class="metric">
+                    <span>參與度等級</span>
+                    <span class="value" style="color: {analysis['participation']['level_color']};">{analysis['participation']['participation_level']}</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>討論品質分析</h3>
+                <div class="metric">
+                    <span>平均品質分數</span>
+                    <span class="value">{analysis['quality']['avg_quality']}/5.0</span>
+                </div>
+                <div class="metric">
+                    <span>高品質討論次數</span>
+                    <span class="value">{analysis['quality']['high_quality_count']} 次</span>
+                </div>
+                <div class="metric">
+                    <span>品質趨勢</span>
+                    <span class="value">{analysis['quality']['quality_trend']}</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>英語使用分析</h3>
+                <div class="metric">
+                    <span>平均英語使用比例</span>
+                    <span class="value">{analysis['english_usage']['avg_english_ratio']:.1%}</span>
+                </div>
+                <div class="metric">
+                    <span>雙語能力評估</span>
+                    <span class="value">{analysis['english_usage']['bilingual_ability']}</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>提問行為分析</h3>
+                <div class="metric">
+                    <span>總提問次數</span>
+                    <span class="value">{analysis['questioning']['total_questions']}</span>
+                </div>
+                <div class="metric">
+                    <span>提問比例</span>
+                    <span class="value">{analysis['questioning']['question_ratio']:.1%}</span>
+                </div>
+                <div class="metric">
+                    <span>提問模式</span>
+                    <span class="value">{analysis['questioning']['questioning_pattern']}</span>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="/student_list" style="color: #007bff; margin: 0 10px;">返回學生列表</a>
+                <a href="/" style="color: #007bff; margin: 0 10px;">回到首頁</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+
+@app.route("/class_analysis")
+def class_analysis():
+    """班級分析頁面"""
+    try:
+        if not ensure_db_exists():
+            return '''
+            <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
+                <h2>資料庫錯誤</h2>
+                <p>資料庫初始化失敗</p>
+                <a href="/" style="color: #007bff;">回到首頁</a>
+            </div>
+            '''
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(DISTINCT u.user_id) as total_students,
+                   COUNT(DISTINCT CASE WHEN i.id IS NOT NULL THEN u.user_id END) as active_students,
+                   AVG(i.quality_score) as avg_quality,
+                   AVG(i.english_ratio) as avg_english,
+                   COUNT(i.id) as total_interactions
+            FROM users u
+            LEFT JOIN interactions i ON u.user_id = i.user_id
+        ''')
+        
+        stats = cursor.fetchone()
+        
+        cursor.execute('''
+            SELECT u.user_name, COUNT(i.id) as interactions,
+                   AVG(i.quality_score) as avg_quality,
+                   AVG(i.english_ratio) as avg_english
+            FROM users u
+            LEFT JOIN interactions i ON u.user_id = i.user_id
+            GROUP BY u.user_id, u.user_name
+            ORDER BY interactions DESC
+            LIMIT 10
+        ''')
+        
+        rankings = cursor.fetchall()
+        conn.close()
+        
+        total_students, active_students, avg_quality, avg_english, total_interactions = stats
+        participation_rate = (active_students / total_students * 100) if total_students > 0 else 0
+        
+        ranking_html = ""
+        for i, (name, interactions, quality, english) in enumerate(rankings, 1):
+            rank_color = "#ffd700" if i <= 3 else "#c0c0c0"
+            ranking_html += f'''
+                <tr>
+                    <td style="background: {rank_color}; color: white; font-weight: bold; text-align: center;">{i}</td>
+                    <td><strong>{name}</strong></td>
+                    <td>{interactions or 0}</td>
+                    <td>{quality:.2f if quality else 0}</td>
+                    <td>{english:.1%} if english else 0%</td>
+                </tr>
+            '''
+        
+        return f'''
+        <!DOCTYPE html>
+        <html lang="zh-TW">
+        <head>
+            <meta charset="UTF-8">
+            <title>班級整體分析報告</title>
+            <style>
+                body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
+                .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+                .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }}
+                .stat-card {{ background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; }}
+                .stat-value {{ font-size: 2em; font-weight: bold; color: #007bff; }}
+                table {{ width: 100%; border-collapse: collapse; }}
+                th, td {{ padding: 12px; border: 1px solid #ddd; text-align: left; }}
+                th {{ background: #f8f9fa; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>AI實務應用課程 - 班級整體分析</h1>
+                <p>分析時間：{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">{total_students or 0}</div>
+                        <div>班級總人數</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{active_students or 0}</div>
+                        <div>活躍學生數</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{participation_rate:.1f}%</div>
+                        <div>參與率</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{avg_quality:.2f if avg_quality else 0}</div>
+                        <div>平均討論品質</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{avg_english:.1%} if avg_english else 0%</div>
+                        <div>平均英語使用</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{total_interactions or 0}</div>
+                        <div>總互動次數</div>
+                    </div>
+                </div>
+                
+                <h2>學生表現排行榜</h2>
+                <table>
+                    <tr>
+                        <th>排名</th>
+                        <th>學生姓名</th>
+                        <th>互動次數</th>
+                        <th>平均品質</th>
+                        <th>英語使用比例</th>
+                    </tr>
+                    {ranking_html}
+                </table>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                    <a href="/" style="color: #007bff; margin: 0 10px;">回到首頁</a>
+                    <a href="/student_list" style="color: #007bff; margin: 0 10px;">學生列表</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+        
+    except Exception as e:
+        return f"班級分析錯誤: {e}"
+
+@app.route("/research_dashboard")
+def research_dashboard():
+    """研究儀表板"""
+    try:
+        if not ensure_db_exists():
+            return '''
+            <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
+                <h2>資料庫錯誤</h2>
+                <p>資料庫初始化失敗</p>
+                <a href="/" style="color: #007bff;">回到首頁</a>
+            </div>
+            '''
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*) FROM interactions')
+        total_interactions = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM interactions')
+        active_students = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM interactions WHERE date(created_at) = date("now")')
+        today_usage = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT AVG(quality_score) FROM interactions WHERE quality_score > 0')
+        avg_quality = cursor.fetchone()[0] or 0
+        
+        cursor.execute('SELECT AVG(english_ratio) FROM interactions WHERE english_ratio IS NOT NULL')
+        avg_english = cursor.fetchone()[0] or 0
+        
+        conn.close()
+        
+        return f'''
+        <!DOCTYPE html>
+        <html lang="zh-TW">
+        <head>
+            <meta charset="UTF-8">
+            <title>EMI教學研究數據儀表板</title>
+            <style>
+                body {{ font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }}
+                .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+                .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }}
+                .metric-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 15px; text-align: center; }}
+                .metric-value {{ font-size: 2.5em; font-weight: bold; margin-bottom: 10px; }}
+                .metric-label {{ font-size: 1.1em; opacity: 0.9; }}
+                .research-section {{ margin: 40px 0; padding: 30px; background: #f8f9fa; border-radius: 10px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>EMI教學研究數據儀表板</h1>
+                <p>AI在生活與學習上的實務應用 - 教學實踐研究</p>
+                
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value">{total_interactions}</div>
+                        <div class="metric-label">總互動次數</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{active_students}</div>
+                        <div class="metric-label">活躍學生數</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{today_usage}</div>
+                        <div class="metric-label">今日使用量</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{avg_quality:.1f}/5.0</div>
+                        <div class="metric-label">討論品質平均分</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{avg_english:.1%}</div>
+                        <div class="metric-label">英語使用比例</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">第{get_current_week()}週</div>
+                        <div class="metric-label">當前課程進度</div>
+                    </div>
+                </div>
+                
+                <div class="research-section">
+                    <h2>114年度教學實踐研究計畫</h2>
+                    <h3>生成式AI輔助的雙語教學創新：提升EMI課程學生參與度與跨文化能力</h3>
+                    <p>量化分析學生參與度、討論品質統計，支援教學實踐研究報告撰寫</p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 40px;">
+                    <a href="/export_research_data" style="padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">匯出完整數據 (CSV)</a>
+                    <a href="/student_list" style="padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">個人分析報告</a>
+                    <a href="/class_analysis" style="padding: 12px 24px; background: #17a2b8; color: white; text-decoration: none; border-radius: 5px; margin: 10px;">班級整體報告</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+        
+    except Exception as e:
+        return f"研究儀表板錯誤: {e}"
+
+@app.route("/export_research_data")
+def export_research_data():
+    """匯出研究數據"""
+    try:
+        if not ensure_db_exists():
+            return "資料庫錯誤：無法匯出數據"
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT u.user_name, i.created_at, i.content, i.message_type,
+                   i.quality_score, i.english_ratio, i.contains_keywords, i.group_id
+            FROM users u
+            JOIN interactions i ON u.user_id = i.user_id
+            ORDER BY i.created_at
+        ''')
+        
+        data = cursor.fetchall()
+        conn.close()
+        
+        csv_content = "學生姓名,時間,內容,訊息類型,品質分數,英語比例,包含關鍵詞,群組互動\n"
+        for row in data:
+            content_preview = row[2][:50].replace('"', '""') if row[2] else ""
+            csv_content += f'"{row[0]}","{row[1]}","{content_preview}...","{row[3]}",{row[4] or 0},{row[5] or 0},{row[6] or 0},"{row[7] or ""}"\n'
+        
+        return Response(
+            csv_content,
+            mimetype="text/csv",
+            headers={"Content-disposition": "attachment; filename=ai_course_research_data.csv"}
+        )
+        
+    except Exception as e:
+        return f"匯出錯誤: {e}"
+
+@app.route("/setup_guide")
+def setup_guide():
+    """設定指南"""
+    return '''
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <title>LINE Bot 設定指南</title>
+        <style>
+            body { font-family: Microsoft JhengHei; margin: 20px; background: #f5f5f5; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+            .step { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #007bff; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>LINE Bot 設定指南</h1>
+            
+            <div class="step">
+                <h3>步驟 1: 建立 LINE Bot</h3>
+                <p>1. 前往 LINE Developers (https://developers.line.biz/)</p>
+                <p>2. 建立新的 Channel（Messaging API）</p>
+                <p>3. 取得 Channel Access Token 和 Channel Secret</p>
+            </div>
+            
+            <div class="step">
+                <h3>步驟 2: 設定 Railway 環境變數</h3>
+                <p>在 Railway 專案的 Variables 頁面設定：</p>
+                <p>CHANNEL_ACCESS_TOKEN = 您的 Channel Access Token</p>
+                <p>CHANNEL_SECRET = 您的 Channel Secret</p>
+            </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="/" style="color: #007bff;">返回首頁</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+
+@app.route("/health")
+def health_check():
+    """健康檢查"""
+    db_status = ensure_db_exists()
+    
+    return jsonify({
+        "status": "healthy" if db_status else "database_error",
+        "timestamp": datetime.now().isoformat(),
+        "system": "AI課程分析系統 v2.0",
+        "line_bot_configured": line_bot_api is not None,
+        "database_status": "connected" if db_status else "failed"
+    })
+
+@app.route("/test_db")
+def test_db():
+    """測試資料庫連接"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = cursor.fetchall()
+        
+        cursor.execute("SELECT COUNT(*) FROM users")
+        user_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM interactions")
+        interaction_count = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return f'''
+        <div style="font-family: Microsoft JhengHei; margin: 20px; padding: 20px; background: white; border-radius: 10px;">
+            <h2>資料庫連接測試</h2>
+            <p><strong>狀態:</strong> 連接成功</p>
+            <p><strong>表格:</strong> {[table[0] for table in tables]}</p>
+            <p><strong>用戶數量:</strong> {user_count}</p>
+            <p><strong>互動記錄:</strong> {interaction_count}</p>
+            <a href="/" style="color: #007bff;">回到首頁</a>
+        </div>
+        '''
+        
+    except Exception as e:
+        return f'''
+        <div style="font-family: Microsoft JhengHei; margin: 20px; padding: 20px; background: white; border-radius: 10px;">
+            <h2>資料庫連接測試</h2>
+            <p><strong>狀態:</strong> 連接失敗</p>
+            <p><strong>錯誤:</strong> {e}</p>
+            <a href="/" style="color: #007bff;">回到首頁</a>
+        </div>
+        '''
+
+@app.errorhandler(404)
+def not_found(error):
+    return '''
+    <div style="text-align: center; padding: 50px; font-family: Microsoft JhengHei;">
+        <h2>頁面未找到</h2>
+        <p>您要查找的頁面不存在</p>
+        <a href="/" style="color: #007bff;">回到首頁</a>
+    </div>
+    ''', 404
+
+if __name__ == "__main__":
+    print("=== AI課程分析系統啟動 ===")
+    init_db()
+    port = int(os.environ.get('PORT', 5000))
+    print(f"啟動應用於 port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+application = app
