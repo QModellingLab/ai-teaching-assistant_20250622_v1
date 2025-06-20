@@ -1,333 +1,384 @@
-# templates.py - 簡化版 HTML 模板
+import os
+import json
+import datetime
+import logging
+import random
+import google.generativeai as genai
+from models import Student, Message, Analysis, db
 
-HOME_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>個人化學習分析系統</title>
-    <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { background: white; padding: 30px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
-        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
-        .stat-card { background: white; padding: 20px; border-radius: 10px; text-align: center; }
-        .stat-number { font-size: 2em; font-weight: bold; color: #007bff; }
-        .nav-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
-        .nav-btn { background: #007bff; color: white; padding: 15px; text-decoration: none; border-radius: 5px; text-align: center; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🎓 個人化學習分析系統</h1>
-            <p>EMI 課程學生參與度追蹤與 AI 輔助分析</p>
-        </div>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-number">{{ total_students }}</div>
-                <div>註冊學生</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{{ total_messages }}</div>
-                <div>總訊息數</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{{ total_questions }}</div>
-                <div>學生提問</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{{ active_today }}</div>
-                <div>今日活躍</div>
-            </div>
-        </div>
-        
-        <div class="nav-links">
-            <a href="/students" class="nav-btn">👥 學生列表</a>
-            <a href="/analysis" class="nav-btn">📊 分析報告</a>
-            <a href="/insights" class="nav-btn">💡 AI 洞察</a>
-            <a href="/dashboard" class="nav-btn">📈 儀表板</a>
-            <a href="/export?format=csv&type=students" class="nav-btn">📄 匯出數據</a>
-        </div>
-    </div>
-</body>
-</html>
-'''
+# 設定日誌
+logger = logging.getLogger(__name__)
 
-STUDENTS_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>學生列表</title>
-    <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
-        .students-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        .student-card { background: white; padding: 20px; border-radius: 10px; position: relative; }
-        .student-card.demo { border: 2px dashed #28a745; background: #f8fff8; }
-        .demo-badge { position: absolute; top: 10px; right: 10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; }
-        .student-header { display: flex; align-items: center; margin-bottom: 15px; }
-        .student-avatar { width: 50px; height: 50px; border-radius: 50%; background: #007bff; color: white; display: flex; align-items: center; justify-content: center; margin-right: 15px; font-weight: bold; }
-        .student-avatar.demo { background: #28a745; }
-        .student-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-        .stat-item { text-align: center; padding: 10px; background: #f8f9fa; border-radius: 5px; }
-        .detail-btn { background: #007bff; color: white; padding: 10px; text-decoration: none; border-radius: 5px; text-align: center; display: block; }
-        .filter-info { background: #e9ecef; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
-        .legend { display: flex; gap: 20px; margin: 10px 0; }
-        .legend-item { display: flex; align-items: center; gap: 8px; }
-        .legend-box { width: 20px; height: 20px; border-radius: 4px; }
-        .legend-real { background: white; border: 2px solid #007bff; }
-        .legend-demo { background: #f8fff8; border: 2px dashed #28a745; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <a href="/" class="back-btn">← 返回首頁</a>
-            <h1>👥 學生列表</h1>
-            <div class="filter-info">
-                <p><strong>學生總數：{{ students|length }}</strong></p>
-                <div class="legend">
-                    <div class="legend-item">
-                        <div class="legend-box legend-real"></div>
-                        <span>真實學生</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-box legend-demo"></div>
-                        <span>演示資料</span>
-                    </div>
-                </div>
-            </div>
-        </div>
+# 初始化 Gemini AI
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-pro')
+        logger.info("✅ Gemini AI 已成功初始化")
+    except Exception as e:
+        model = None
+        logger.error(f"❌ Gemini AI 初始化失敗: {e}")
+else:
+    model = None
+    logger.warning("⚠️ Gemini API key not found")
+
+def get_ai_response(query, student_id=None):
+    """取得 AI 回應"""
+    try:
+        if not model:
+            logger.error("❌ AI 模型未初始化")
+            return "抱歉，AI 服務目前無法使用。請檢查 API 設定。"
         
-        <div class="students-grid">
-            {% for student in students %}
-            <div class="student-card {{ 'demo' if student.name.startswith('[DEMO]') else '' }}">
-                {% if student.name.startswith('[DEMO]') %}
-                <div class="demo-badge">演示</div>
-                {% endif %}
+        if not query or len(query.strip()) == 0:
+            return "請提供您的問題，我很樂意為您解答！"
+        
+        # 取得學生資訊
+        student_context = ""
+        if student_id:
+            try:
+                student = Student.get_by_id(student_id)
+                student_context = f"""
+學生背景：
+- 姓名：{student.name}
+- 參與度：{student.participation_rate}%
+- 提問率：{student.question_rate}%
+- 學習風格：{student.learning_style or '分析中'}
+"""
+            except Exception as e:
+                logger.warning(f"無法取得學生資訊: {e}")
+        
+        # 構建提示詞
+        prompt = f"""
+你是一個專業的雙語教學AI助理，專門協助EMI（English as Medium of Instruction）課程學習。
+
+身份：友善、專業、有耐心的教學助理
+語言：主要使用繁體中文回應，必要時提供英文術語
+風格：簡潔明瞭、具有教育意義
+
+任務：回答學生的問題，提供準確且有幫助的學習指導。
+
+回應原則：
+1. 使用友善、鼓勵的語調
+2. 提供清晰、準確的解答
+3. 適當時給出學習建議
+4. 回應長度控制在 200 字以內
+5. 如果是英文問題，可以用中英雙語回應
+
+{student_context}
+
+學生問題：{query}
+
+請提供有幫助的回應：
+"""
+        
+        logger.info(f"🤖 正在為學生生成 AI 回應...")
+        
+        # 取得 AI 回應
+        response = model.generate_content(prompt)
+        
+        if response and response.text:
+            ai_response = response.text.strip()
+            logger.info(f"✅ AI 回應成功生成，長度: {len(ai_response)} 字")
+            return ai_response
+        else:
+            logger.error("❌ AI 回應為空")
+            return "抱歉，我現在無法生成適當的回應。請稍後再試或重新表達您的問題。"
+            
+    except Exception as e:
+        logger.error(f"❌ AI 回應生成錯誤: {str(e)}")
+        return f"抱歉，處理您的問題時發生錯誤：{str(e)[:100]}。請稍後再試。"
+
+def analyze_student_patterns(student_id):
+    """分析學生學習模式"""
+    try:
+        if not model:
+            logger.warning("⚠️ AI 模型未初始化，無法進行學習模式分析")
+            return None
+            
+        student = Student.get_by_id(student_id)
+        
+        # 取得最近的訊息
+        recent_messages = list(Message.select().where(
+            Message.student == student
+        ).order_by(Message.timestamp.desc()).limit(20))
+        
+        if not recent_messages:
+            return "該學生尚無足夠的互動記錄進行分析。"
+        
+        # 準備分析資料
+        messages_text = []
+        questions = []
+        
+        for msg in recent_messages:
+            messages_text.append(msg.content)
+            if msg.message_type == 'question':
+                questions.append(msg.content)
+        
+        # 構建分析提示詞
+        analysis_prompt = f"""
+作為教育數據分析專家，請分析以下學生的學習模式：
+
+學生基本資料：
+- 姓名：{student.name}
+- 總發言數：{student.message_count}
+- 提問次數：{student.question_count}
+- 參與度：{student.participation_rate}%
+
+近期互動內容（最多10則）：
+{chr(10).join(messages_text[:10])}
+
+主要提問內容（最多5則）：
+{chr(10).join(questions[:5]) if questions else "尚無提問記錄"}
+
+請提供150-200字的學習模式分析，包含：
+1. 學習風格特點（主動/被動、探索型/實作型等）
+2. 參與程度評估
+3. 具體學習建議
+4. 需要教師關注的方面
+
+分析結果：
+"""
+        
+        response = model.generate_content(analysis_prompt)
+        
+        if response and response.text:
+            logger.info(f"✅ 學生學習模式分析完成: {student.name}")
+            return response.text.strip()
+        else:
+            logger.error("❌ 學習模式分析回應為空")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ 學生模式分析錯誤: {e}")
+        return None
+
+def update_student_stats(student_id):
+    """更新學生統計資料"""
+    try:
+        student = Student.get_by_id(student_id)
+        student.update_stats()
+        logger.info(f"✅ 更新學生統計: {student.name}")
+        
+    except Exception as e:
+        logger.error(f"❌ 更新統計錯誤: {e}")
+
+def create_sample_data():
+    """建立範例資料 - 明確標示為虛擬學生"""
+    try:
+        # 建立範例學生 - 加上 [DEMO] 前綴
+        sample_students = [
+            {
+                'name': '[DEMO] 王小明',
+                'line_user_id': 'demo_student_001',
+                'message_count': 25,
+                'question_count': 8,
+                'participation_rate': 75.5,
+                'question_rate': 32.0,
+                'learning_style': '主動探索型',
+                'notes': '這是系統演示用的虛擬學生資料'
+            },
+            {
+                'name': '[DEMO] 李美華',
+                'line_user_id': 'demo_student_002', 
+                'message_count': 18,
+                'question_count': 12,
+                'participation_rate': 68.2,
+                'question_rate': 66.7,
+                'learning_style': '問題導向型',
+                'notes': '這是系統演示用的虛擬學生資料'
+            },
+            {
+                'name': '[DEMO] John Smith',
+                'line_user_id': 'demo_student_003',
+                'message_count': 32,
+                'question_count': 5,
+                'participation_rate': 82.3,
+                'question_rate': 15.6,
+                'learning_style': '實作導向型',
+                'notes': '這是系統演示用的虛擬學生資料'
+            }
+        ]
+        
+        for student_data in sample_students:
+            try:
+                # 檢查是否已存在
+                existing = Student.select().where(
+                    Student.line_user_id == student_data['line_user_id']
+                ).first()
                 
-                <div class="student-header">
-                    <div class="student-avatar {{ 'demo' if student.name.startswith('[DEMO]') else '' }}">
-                        {{ student.name.replace('[DEMO] ', '')[0] if student.name else '?' }}
-                    </div>
-                    <div>
-                        <h3>{{ student.name.replace('[DEMO] ', '') if student.name.startswith('[DEMO]') else (student.name or '未知用戶') }}</h3>
-                        {% if student.name.startswith('[DEMO]') %}
-                            <small style="color: #28a745; font-weight: bold;">🎭 系統演示資料</small>
-                        {% else %}
-                            <span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">
-                                {{ '活躍' if student.is_active else '不活躍' }}
-                            </span>
-                        {% endif %}
-                    </div>
-                </div>
+                if not existing:
+                    student = Student.create(
+                        name=student_data['name'],
+                        line_user_id=student_data['line_user_id'],
+                        message_count=student_data['message_count'],
+                        question_count=student_data['question_count'],
+                        participation_rate=student_data['participation_rate'],
+                        question_rate=student_data['question_rate'],
+                        learning_style=student_data['learning_style'],
+                        notes=student_data['notes'],
+                        created_at=datetime.datetime.now() - datetime.timedelta(days=random.randint(1, 30)),
+                        last_active=datetime.datetime.now() - datetime.timedelta(hours=random.randint(1, 48))
+                    )
+                    
+                    # 建立範例訊息
+                    create_sample_messages(student)
+                    
+                    logger.info(f"✅ 建立演示學生: {student.name}")
+                    
+            except Exception as e:
+                logger.error(f"❌ 建立演示學生錯誤: {e}")
                 
-                <div class="student-stats">
-                    <div class="stat-item">
-                        <div style="font-size: 1.5em; font-weight: bold; color: #007bff;">{{ student.message_count }}</div>
-                        <div>總發言</div>
-                    </div>
-                    <div class="stat-item">
-                        <div style="font-size: 1.5em; font-weight: bold; color: #007bff;">{{ student.question_count }}</div>
-                        <div>提問數</div>
-                    </div>
-                </div>
+    except Exception as e:
+        logger.error(f"❌ 建立演示資料錯誤: {e}")
+
+def create_sample_messages(student):
+    """為演示學生建立範例訊息"""
+    try:
+        sample_messages = [
+            {'content': '老師好，請問今天的作業要怎麼做？', 'type': 'question'},
+            {'content': '我覺得這個概念很有趣！', 'type': 'statement'},
+            {'content': '可以再解釋一下 machine learning 嗎？', 'type': 'question'},
+            {'content': '謝謝老師的說明，我明白了', 'type': 'statement'},
+            {'content': 'What is the difference between AI and ML?', 'type': 'question'},
+            {'content': '這個例子很清楚！', 'type': 'statement'},
+            {'content': '請問有推薦的參考書籍嗎？', 'type': 'question'},
+        ]
+        
+        # 只建立符合該學生訊息數量的範例
+        messages_to_create = min(len(sample_messages), student.message_count)
+        
+        for i in range(messages_to_create):
+            msg_data = sample_messages[i % len(sample_messages)]
+            Message.create(
+                student=student,
+                content=msg_data['content'],
+                message_type=msg_data['type'],
+                timestamp=datetime.datetime.now() - datetime.timedelta(hours=random.randint(1, 72)),
+                source_type='demo'  # 標示為演示訊息
+            )
                 
-                <a href="/student/{{ student.id }}" class="detail-btn">
-                    {% if student.name.startswith('[DEMO]') %}
-                        🎭 查看演示分析
-                    {% else %}
-                        📊 查看詳細分析
-                    {% endif %}
-                </a>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-</body>
-</html>
-'''
+    except Exception as e:
+        logger.error(f"❌ 建立演示訊息錯誤: {e}")
 
-STUDENT_DETAIL_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>{{ student.name }} - 學習分析</title>
-    <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
-        .profile { display: flex; align-items: center; margin: 20px 0; }
-        .avatar { width: 80px; height: 80px; border-radius: 50%; background: #007bff; color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; margin-right: 20px; }
-        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
-        .metric-card { background: white; padding: 20px; border-radius: 10px; text-align: center; }
-        .metric-value { font-size: 2em; font-weight: bold; color: #007bff; }
-        .section { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .question-item { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #007bff; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <a href="/students" class="back-btn">← 返回學生列表</a>
-            <div class="profile">
-                <div class="avatar">{{ student.name[0] if student.name else '?' }}</div>
-                <div>
-                    <h1>{{ student.name or '未知用戶' }}</h1>
-                    <p>註冊時間：{{ student.created_at.strftime('%Y-%m-%d') }}</p>
-                </div>
-            </div>
-        </div>
+def cleanup_database():
+    """清理資料庫"""
+    try:
+        # 清理超過 90 天的舊資料
+        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=90)
         
-        <div class="metrics">
-            <div class="metric-card">
-                <div class="metric-value">{{ student.message_count }}</div>
-                <div>總發言數</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">{{ student.question_count }}</div>
-                <div>提問次數</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">{{ "%.1f"|format(student.participation_rate) }}%</div>
-                <div>參與度</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">{{ "%.1f"|format(student.question_rate) }}%</div>
-                <div>提問率</div>
-            </div>
-        </div>
+        old_messages = Message.select().where(Message.timestamp < cutoff_date)
+        deleted_count = 0
         
-        <div class="section">
-            <h2>📝 近期提問記錄</h2>
-            {% if recent_questions %}
-                {% for question in recent_questions %}
-                <div class="question-item">
-                    <div>{{ question.content }}</div>
-                    <small style="color: #666;">{{ question.timestamp.strftime('%Y-%m-%d %H:%M') }}</small>
-                </div>
-                {% endfor %}
-            {% else %}
-                <p>尚無提問記錄</p>
-            {% endif %}
-        </div>
+        for message in old_messages:
+            message.delete_instance()
+            deleted_count += 1
+            
+        logger.info(f"🧹 清理了 {deleted_count} 筆舊訊息")
         
-        {% if ai_analysis %}
-        <div class="section">
-            <h2>🤖 AI 分析洞察</h2>
-            <div style="background: #e3f2fd; padding: 15px; border-radius: 5px; border-left: 4px solid #2196f3;">
-                {{ ai_analysis.content }}
-            </div>
-        </div>
-        {% endif %}
-    </div>
-</body>
-</html>
-'''
+    except Exception as e:
+        logger.error(f"❌ 資料庫清理錯誤: {e}")
 
-ANALYSIS_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>分析報告</title>
-    <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { background: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
-        .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
-        .section { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
-        .stat-card { background: #f8f9fa; padding: 20px; border-radius: 10px; text-align: center; }
-        .stat-number { font-size: 2em; font-weight: bold; color: #007bff; }
-        .chart-placeholder { background: #f8f9fa; padding: 40px; text-align: center; border-radius: 10px; color: #666; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <a href="/" class="back-btn">← 返回首頁</a>
-            <h1>📊 班級分析報告</h1>
-        </div>
-        
-        <div class="section">
-            <h2>參與度趨勢</h2>
-            <div class="chart-placeholder">
-                📈 參與度趨勢圖<br>
-                (可整合圖表庫)
-            </div>
-        </div>
-        
-        <div class="section">
-            <h2>整體統計</h2>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number">{{ stats.avg_participation or 0 }}%</div>
-                    <div>平均參與度</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{{ stats.total_questions or 0 }}</div>
-                    <div>總提問數</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{{ stats.active_students or 0 }}</div>
-                    <div>活躍學生</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{{ stats.avg_questions_per_student or 0 }}</div>
-                    <div>人均提問</div>
-                </div>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-'''
+def validate_environment():
+    """驗證環境變數"""
+    required_vars = [
+        'GEMINI_API_KEY',
+        'CHANNEL_ACCESS_TOKEN', 
+        'CHANNEL_SECRET'
+    ]
+    
+    missing_vars = []
+    for var in required_vars:
+        value = os.getenv(var) or os.getenv(f'LINE_{var}')  # 支援兩種格式
+        if not value:
+            missing_vars.append(var)
+    
+    if missing_vars:
+        logger.error(f"❌ 缺少環境變數: {', '.join(missing_vars)}")
+        return False
+    
+    logger.info("✅ 環境變數驗證通過")
+    return True
 
-INSIGHTS_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>AI 洞察</title>
-    <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { background: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
-        .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
-        .insight-card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .insight-header { display: flex; align-items: center; margin-bottom: 15px; }
-        .insight-icon { width: 40px; height: 40px; background: #007bff; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 15px; }
-        .insight-content { line-height: 1.6; }
-        .no-insights { text-align: center; padding: 40px; color: #666; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <a href="/" class="back-btn">← 返回首頁</a>
-            <h1>💡 AI 洞察報告</h1>
-        </div>
+def get_system_status():
+    """取得系統狀態"""
+    try:
+        # 檢查 AI 服務狀態
+        ai_status = 'available'
+        if model:
+            try:
+                # 簡單測試 AI 回應
+                test_response = model.generate_content("Hello")
+                if not test_response or not test_response.text:
+                    ai_status = 'error'
+            except:
+                ai_status = 'error'
+        else:
+            ai_status = 'unavailable'
         
-        {% if insights %}
-            {% for insight in insights %}
-            <div class="insight-card">
-                <div class="insight-header">
-                    <div class="insight-icon">🤖</div>
-                    <div>
-                        <h3>{{ insight.title or '學習分析' }}</h3>
-                        <small>{{ insight.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
-                    </div>
-                </div>
-                <div class="insight-content">{{ insight.content }}</div>
-            </div>
-            {% endfor %}
-        {% else %}
-            <div
+        status = {
+            'database': 'connected' if not db.is_closed() else 'disconnected',
+            'ai_service': ai_status,
+            'total_students': Student.select().count(),
+            'real_students': Student.select().where(~Student.name.startswith('[DEMO]')).count(),
+            'demo_students': Student.select().where(Student.name.startswith('[DEMO]')).count(),
+            'total_messages': Message.select().count(),
+            'last_update': datetime.datetime.now().isoformat()
+        }
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"❌ 取得系統狀態錯誤: {e}")
+        return {'error': str(e)}
+
+def safe_database_operation(operation):
+    """安全的資料庫操作"""
+    try:
+        if db.is_closed():
+            db.connect()
+        
+        result = operation()
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ 資料庫操作錯誤: {e}")
+        return None
+    finally:
+        if not db.is_closed():
+            db.close()
+
+def test_ai_connection():
+    """測試 AI 連接"""
+    try:
+        if not model:
+            return False, "AI 模型未初始化"
+        
+        test_response = model.generate_content("請簡單回答：你好")
+        if test_response and test_response.text:
+            return True, "AI 連接正常"
+        else:
+            return False, "AI 回應為空"
+            
+    except Exception as e:
+        return False, f"AI 連接錯誤: {str(e)}"
+
+# 初始化檢查
+def initialize_utils():
+    """初始化工具模組"""
+    logger.info("🔧 初始化 utils 模組...")
+    
+    # 驗證環境
+    env_ok = validate_environment()
+    if not env_ok:
+        logger.warning("⚠️ 環境變數檢查未通過，部分功能可能無法使用")
+    
+    # 測試 AI 連接
+    ai_ok, ai_msg = test_ai_connection()
+    logger.info(f"🤖 AI 狀態: {ai_msg}")
+    
+    logger.info("✅ Utils 模組初始化完成")
+
+# 自動執行初始化
+initialize_utils()
