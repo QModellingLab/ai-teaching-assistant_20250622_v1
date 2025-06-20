@@ -1,4 +1,4 @@
-# templates.py - 簡化版 HTML 模板
+# templates.py - 完整修復版 HTML 模板
 
 HOME_TEMPLATE = '''
 <!DOCTYPE html>
@@ -166,10 +166,12 @@ STUDENT_DETAIL_TEMPLATE = '''
         .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
         .profile { display: flex; align-items: center; margin: 20px 0; }
         .avatar { width: 80px; height: 80px; border-radius: 50%; background: #007bff; color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; margin-right: 20px; }
+        .avatar.demo { background: #28a745; }
         .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
         .metric-card { background: white; padding: 20px; border-radius: 10px; text-align: center; }
         .metric-value { font-size: 2em; font-weight: bold; color: #007bff; }
         .section { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .demo-warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 10px; margin-bottom: 20px; color: #856404; }
         .question-item { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #007bff; }
     </style>
 </head>
@@ -177,11 +179,24 @@ STUDENT_DETAIL_TEMPLATE = '''
     <div class="container">
         <div class="header">
             <a href="/students" class="back-btn">← 返回學生列表</a>
+            
+            {% if student.name.startswith('[DEMO]') %}
+            <div class="demo-warning">
+                <strong>🎭 這是系統演示資料</strong><br>
+                此學生資料僅供系統功能展示，並非真實學生數據。
+            </div>
+            {% endif %}
+            
             <div class="profile">
-                <div class="avatar">{{ student.name[0] if student.name else '?' }}</div>
+                <div class="avatar {{ 'demo' if student.name.startswith('[DEMO]') else '' }}">
+                    {{ student.name.replace('[DEMO] ', '')[0] if student.name else '?' }}
+                </div>
                 <div>
-                    <h1>{{ student.name or '未知用戶' }}</h1>
+                    <h1>{{ student.name.replace('[DEMO] ', '') if student.name.startswith('[DEMO]') else (student.name or '未知用戶') }}</h1>
                     <p>註冊時間：{{ student.created_at.strftime('%Y-%m-%d') }}</p>
+                    {% if student.name.startswith('[DEMO]') %}
+                        <p style="color: #28a745; font-weight: bold;">🎭 演示學生資料</p>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -330,4 +345,14 @@ INSIGHTS_TEMPLATE = '''
             </div>
             {% endfor %}
         {% else %}
-            <div
+            <div class="insight-card">
+                <div class="no-insights">
+                    🔍 尚無 AI 洞察報告<br>
+                    系統會在收集足夠數據後自動生成分析
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+'''
