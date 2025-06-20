@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # 環境變數設定
-CHANNEL_ACCESS_TOKEN = os.getenv('CHANNEL_ACCESS_TOKEN')
-CHANNEL_SECRET = os.getenv('CHANNEL_SECRET')
+CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')  # 改成這樣
+CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')              # 改成這樣
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
