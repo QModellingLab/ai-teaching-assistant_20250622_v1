@@ -24,22 +24,33 @@ logger = logging.getLogger(__name__)
 # Flask 應用初始化
 app = Flask(__name__)
 
-# 環境變數設定
-CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')  # 改成這樣
-CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')              # 改成這樣
+# 環境變數設定 - 修復變數名稱
+CHANNEL_ACCESS_TOKEN = os.getenv('CHANNEL_ACCESS_TOKEN') or os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+CHANNEL_SECRET = os.getenv('CHANNEL_SECRET') or os.getenv('LINE_CHANNEL_SECRET')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
     logger.error("Missing LINE Bot credentials")
-    raise ValueError("請設定 LINE Bot 的 CHANNEL_ACCESS_TOKEN 和 CHANNEL_SECRET")
+    logger.info("請檢查環境變數: CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET")
+    # 不要拋出錯誤，允許系統啟動以便檢查
+else:
+    logger.info("LINE Bot 憑證已載入")
 
 if not GEMINI_API_KEY:
     logger.error("Missing Gemini API key")
-    raise ValueError("請設定 GEMINI_API_KEY")
+    logger.info("請檢查環境變數: GEMINI_API_KEY")
+else:
+    logger.info("Gemini API 金鑰已載入")
 
 # LINE Bot API 初始化
-line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(CHANNEL_SECRET)
+if CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET:
+    line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+    handler = WebhookHandler(CHANNEL_SECRET)
+    logger.info("LINE Bot API 初始化成功")
+else:
+    line_bot_api = None
+    handler = None
+    logger.warning("LINE Bot API 未初始化")
 
 # 初始化資料庫
 try:
@@ -54,7 +65,11 @@ init_routes(app)
 @app.route("/callback", methods=['POST'])
 def callback():
     """LINE Bot Webhook 處理"""
-    signature = request.headers['X-Line-Signature']
+    if not handler:
+        logger.error("LINE Bot handler 未初始化")
+        abort(500)
+    
+    signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
     
     logger.info(f"Request body: {body}")
@@ -70,42 +85,44 @@ def callback():
     
     return 'OK'
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    """處理 LINE 訊息事件"""
-    try:
-        user_id = event.source.user_id
-        message_text = event.message.text
-        
-        logger.info(f"收到訊息: {user_id} - {message_text}")
-        
-        # 取得或建立學生記錄
-        student = get_or_create_student(user_id, event)
-        
-        # 記錄訊息
-        save_message(student, message_text, event)
-        
-        # 更新學生統計
-        update_student_stats(student.id)
-        
-        # 處理 AI 回應
-        if message_text.startswith('@AI') or event.source.type == 'user':
-            handle_ai_request(event, student, message_text)
-        
-        # 進行週期性分析
-        if student.message_count % 5 == 0:  # 每5則訊息分析一次
-            perform_periodic_analysis(student)
-            
-    except Exception as e:
-        logger.error(f"處理訊息時發生錯誤: {e}")
-        # 回傳錯誤訊息給用戶
+if handler:  # 只有在 handler 存在時才註冊事件處理器
+    @handler.add(MessageEvent, message=TextMessage)
+    def handle_message(event):
+        """處理 LINE 訊息事件"""
         try:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="抱歉，系統處理時發生錯誤，請稍後再試。")
-            )
-        except:
-            pass
+            user_id = event.source.user_id
+            message_text = event.message.text
+            
+            logger.info(f"收到訊息: {user_id} - {message_text}")
+            
+            # 取得或建立學生記錄
+            student = get_or_create_student(user_id, event)
+            
+            # 記錄訊息
+            save_message(student, message_text, event)
+            
+            # 更新學生統計
+            update_student_stats(student.id)
+            
+            # 處理 AI 回應
+            if message_text.startswith('@AI') or event.source.type == 'user':
+                handle_ai_request(event, student, message_text)
+            
+            # 進行週期性分析
+            if student.message_count % 5 == 0:  # 每5則訊息分析一次
+                perform_periodic_analysis(student)
+                
+        except Exception as e:
+            logger.error(f"處理訊息時發生錯誤: {e}")
+            # 回傳錯誤訊息給用戶
+            try:
+                if line_bot_api:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="抱歉，系統處理時發生錯誤，請稍後再試。")
+                    )
+            except:
+                pass
 
 def get_or_create_student(user_id, event):
     """取得或建立學生記錄"""
@@ -118,8 +135,11 @@ def get_or_create_student(user_id, event):
     except Student.DoesNotExist:
         # 嘗試取得用戶資料
         try:
-            profile = line_bot_api.get_profile(user_id)
-            display_name = profile.display_name
+            if line_bot_api:
+                profile = line_bot_api.get_profile(user_id)
+                display_name = profile.display_name
+            else:
+                display_name = f"User_{user_id[:8]}"
         except:
             display_name = f"User_{user_id[:8]}"
         
@@ -149,7 +169,7 @@ def save_message(student, message_text, event):
         content=message_text,
         message_type='question' if is_question else 'statement',
         timestamp=datetime.datetime.now(),
-        source_type=event.source.type,
+        source_type=getattr(event.source, 'type', 'unknown'),
         group_id=getattr(event.source, 'group_id', None),
         room_id=getattr(event.source, 'room_id', None)
     )
@@ -180,7 +200,7 @@ def handle_ai_request(event, student, message_text):
         # 取得 AI 回應
         ai_response = get_ai_response(query, student.id)
         
-        if ai_response:
+        if ai_response and line_bot_api:
             # 儲存 AI 回應記錄
             AIResponse.create(
                 student=student,
@@ -198,18 +218,20 @@ def handle_ai_request(event, student, message_text):
             
             logger.info(f"AI 回應已發送給 {student.name}")
         else:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="抱歉，我現在無法回應您的問題，請稍後再試。")
-            )
+            if line_bot_api:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="抱歉，我現在無法回應您的問題，請稍後再試。")
+                )
             
     except Exception as e:
         logger.error(f"處理 AI 請求時發生錯誤: {e}")
         try:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="系統處理中發生問題，請稍後再試。")
-            )
+            if line_bot_api:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="系統處理中發生問題，請稍後再試。")
+                )
         except:
             pass
 
@@ -234,11 +256,20 @@ def perform_periodic_analysis(student):
 @app.route('/health')
 def health_check():
     """健康檢查端點"""
-    return {
-        'status': 'healthy',
-        'timestamp': datetime.datetime.now().isoformat(),
-        'database': 'connected' if db.is_closed() == False else 'disconnected'
-    }
+    try:
+        return {
+            'status': 'healthy',
+            'timestamp': datetime.datetime.now().isoformat(),
+            'database': 'connected' if not db.is_closed() else 'disconnected',
+            'line_bot': 'configured' if line_bot_api else 'not_configured',
+            'gemini_ai': 'configured' if GEMINI_API_KEY else 'not_configured'
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.datetime.now().isoformat()
+        }, 500
 
 @app.route('/stats')
 def get_stats():
@@ -268,8 +299,7 @@ def internal_error(error):
     logger.error(f"Internal server error: {error}")
     return {'error': 'Internal server error'}, 500
 
-# 初始化範例資料（僅在開發環境）
-@app.before_first_request
+# 初始化範例資料的函數 - 移除過時的裝飾器
 def initialize_sample_data():
     """初始化範例資料"""
     try:
@@ -280,6 +310,13 @@ def initialize_sample_data():
             logger.info("範例資料建立完成")
     except Exception as e:
         logger.error(f"建立範例資料時發生錯誤: {e}")
+
+# 在應用程式啟動時初始化資料
+with app.app_context():
+    try:
+        initialize_sample_data()
+    except Exception as e:
+        logger.error(f"應用程式初始化錯誤: {e}")
 
 # 程式進入點
 if __name__ == "__main__":
