@@ -1158,7 +1158,7 @@ def student_analysis(user_id):
                             <div class="progress-bar">
                                 <div class="progress-fill" style="width: {quality['avg_quality']*20}%;"></div>
                             </div>
-                            <small>{quality['avg_quality']*20:.1f}%</small>
+                            <small>{quality['avg_quality']*20:.1f}&#37;</small>
                         </div>
                     </div>
                     
@@ -1166,18 +1166,18 @@ def student_analysis(user_id):
                         <h3>🌐 雙語能力</h3>
                         <div class="stat-row">
                             <span>英語使用比例：</span>
-                            <strong>{english['avg_english_ratio']*100:.1f}%</strong>
+                            <strong>{english['avg_english_ratio']*100:.1f}&#37;</strong>
                         </div>
                         <div class="stat-row">
                             <span>雙語能力評估：</span>
                             <strong>{english['bilingual_ability']}</strong>
                         </div>
                         <div>
-                            <span>EMI參與度：</span>
+                            <span>英語使用比例：</span>
                             <div class="progress-bar">
-                                <div class="progress-fill" style="width: {english['avg_english_ratio']*100}%;"></div>
+                                <div class="progress-fill" style="width: {english['avg_english_ratio']*100}&#37;;"></div>
                             </div>
-                            <small>English Usage: {english['avg_english_ratio']*100:.1f}%</small>
+                            <small>English Usage: {english['avg_english_ratio']*100:.1f}&#37;</small>
                         </div>
                     </div>
                     
@@ -1189,7 +1189,7 @@ def student_analysis(user_id):
                         </div>
                         <div class="stat-row">
                             <span>提問比例：</span>
-                            <strong>{questioning['question_ratio']*100:.1f}%</strong>
+                            <strong>{questioning['question_ratio']*100:.1f}&#37;</strong>
                         </div>
                         <div class="stat-row">
                             <span>提問模式：</span>
@@ -1198,7 +1198,7 @@ def student_analysis(user_id):
                         <div>
                             <span>好奇心指數：</span>
                             <div class="progress-bar">
-                                <div class="progress-fill" style="width: {questioning['question_ratio']*100}%;"></div>
+                                <div class="progress-fill" style="width: {questioning['question_ratio']*100}&#37;;"></div>
                             </div>
                         </div>
                     </div>
@@ -1347,7 +1347,7 @@ def class_analysis():
                         <p>討論品質分數</p>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-number">{avg_english*100:.0f}%</div>
+                        <div class="stat-number">{avg_english*100:.0f}&#37;</div>
                         <h3>英語使用</h3>
                         <p>EMI課程參與度</p>
                     </div>
@@ -1388,14 +1388,14 @@ def class_analysis():
                     <h2>🏆 學生互動排行榜</h2>
                     <div class="student-ranking">
                         {''.join(f'''
-                        <div class="rank-item">
-                            <span>
-                                <strong>#{i+1}</strong> 
-                                {student[0]} 
-                                {'🤖' if student[2] else '👤'}
-                            </span>
-                            <span style="font-weight: bold; color: #007bff;">{student[1]} 次</span>
-                        </div>
+                    <div class="rank-item">
+                        <span>
+                            <strong>#{i+1}</strong> 
+                            {student[0]} 
+                            {'🤖' if student[2] else '👤'}
+                        </span>
+                        <span style="font-weight: bold; color: #007bff;">{student[1]} 次</span>
+                    </div>
                         ''' for i, student in enumerate(student_activity[:10]))}
                     </div>
                 </div>
@@ -1414,12 +1414,12 @@ def class_analysis():
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
                         <div style="padding: 20px; background: #e8f5e8; border-radius: 10px;">
                             <h4 style="color: #155724;">EMI雙語教學效果</h4>
-                            <p>英語使用比例: <strong>{avg_english*100:.1f}%</strong></p>
+                            <p>英語使用比例: <strong>{avg_english*100:.1f}&#37;</strong></p>
                             <p>評估: <strong>{'優秀' if avg_english >= 0.6 else '良好' if avg_english >= 0.4 else '需改進'}</strong></p>
                         </div>
                         <div style="padding: 20px; background: #e8f4fd; border-radius: 10px;">
                             <h4 style="color: #0c5460;">學生參與度</h4>
-                            <p>活躍學生比例: <strong>{len([s for s in student_activity if s[1] > 0]) / max(len(student_activity), 1) * 100:.1f}%</strong></p>
+                            <p>活躍學生比例: <strong>{len([s for s in student_activity if s[1] > 0]) / max(len(student_activity), 1) * 100:.1f}&#37;</strong></p>
                             <p>評估: <strong>{'優秀' if len([s for s in student_activity if s[1] > 0]) / max(len(student_activity), 1) >= 0.8 else '良好' if len([s for s in student_activity if s[1] > 0]) / max(len(student_activity), 1) >= 0.6 else '需改進'}</strong></p>
                         </div>
                         <div style="padding: 20px; background: #fff3cd; border-radius: 10px;">
@@ -1571,7 +1571,7 @@ def research_dashboard():
                         <p>平均品質分數</p>
                     </div>
                     <div class="metric-card">
-                        <div class="metric-value">{research_stats[3]*100:.1f if research_stats and research_stats[3] else 0}%</div>
+                        <div class="metric-value">{research_stats[3]*100:.1f if research_stats and research_stats[3] else 0}&#37;</div>
                         <h4>英語使用率</h4>
                         <p>EMI課程效果</p>
                     </div>
@@ -1606,7 +1606,7 @@ def research_dashboard():
                             <tr>
                                 <td>{student[1]}</td>
                                 <td>{student[2]}</td>
-                                <td>{student[3]*100:.1f}%</td>
+                                <td>{student[3]*100:.1f}&#37;</td>
                                 <td>{student[4]:.2f}/5.0</td>
                                 <td style="color: {'#28a745' if student[3] >= 0.6 else '#ffc107' if student[3] >= 0.3 else '#dc3545'};">
                                     {'優秀' if student[3] >= 0.6 else '良好' if student[3] >= 0.3 else '需輔導'}
@@ -1628,7 +1628,7 @@ def research_dashboard():
                         </div>
                         <div>
                             <h4>品質指標</h4>
-                            <p>高品質互動比例: <strong>{len([d for d in daily_trends if d[2] and d[2] >= 4.0]) / max(len(daily_trends), 1) * 100:.1f}%</strong></p>
+                            <p>高品質互動比例: <strong>{len([d for d in daily_trends if d[2] and d[2] >= 4.0]) / max(len(daily_trends), 1) * 100:.1f}&#37;</strong></p>
                             <p>英語使用穩定性: <strong>{'穩定' if len(daily_trends) > 5 else '觀察中'}</strong></p>
                             <p>EMI教學效果: <strong>{'顯著' if research_stats and research_stats[3] >= 0.5 else '發展中'}</strong></p>
                         </div>
@@ -2141,7 +2141,7 @@ application = app</li
                             <div class="progress-bar">
                                 <div class="progress-fill" style="width: {participation['consistency_score']}%;"></div>
                             </div>
-                            <small>{participation['consistency_score']}%</small>
+                            <small>{participation['consistency_score']}&#37;</small>
                         </div>
                     </div>
                     
