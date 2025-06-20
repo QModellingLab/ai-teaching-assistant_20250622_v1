@@ -1,4 +1,101 @@
+# Flask Web Framework
 Flask==2.3.3
+Werkzeug==2.3.7
+
+# Database ORM
+peewee==3.16.3
+
+# PostgreSQL adapter (for production)
+psycopg2-binary==2.9.7
+
+# LINE Bot SDK
 line-bot-sdk==3.5.0
+
+# Google AI SDK
+google-generativeai==0.3.2
+
+# HTTP requests
+requests==2.31.0
+
+# JSON Web Tokens (if needed for authentication)
+PyJWT==2.8.0
+
+# Date and time utilities
+python-dateutil==2.8.2
+
+# Environment variable management
+python-dotenv==1.0.0
+
+# CSV processing
+pandas==2.1.1
+
+# Data validation
+marshmallow==3.20.1
+
+# Logging utilities
+structlog==23.1.0
+
+# HTTP client with better error handling
+httpx==0.24.1
+
+# Task scheduling (optional)
+APScheduler==3.10.4
+
+# Caching (optional)
+Flask-Caching==2.1.0
+
+# CORS support
+Flask-CORS==4.0.0
+
+# Rate limiting
+Flask-Limiter==3.5.0
+
+# Production WSGI server
 gunicorn==21.2.0
-schedule==1.2.0
+
+# Development server with auto-reload
+watchdog==3.0.0
+
+# Testing framework
+pytest==7.4.2
+pytest-flask==1.2.0
+
+# Code formatting and linting (development)
+black==23.9.1
+flake8==6.1.0
+
+# Type checking (development)
+mypy==1.5.1
+
+# Security utilities
+cryptography==41.0.4
+
+# HTML parsing (if needed)
+BeautifulSoup4==4.12.2
+
+# Unicode handling
+Unidecode==1.3.6
+
+# Memory optimization
+pympler==0.9
+
+# Timezone handling
+pytz==2023.3
+
+# Configuration management
+configparser==6.0.0
+
+# File handling
+pathlib2==2.3.7
+
+# URL parsing
+urllib3==2.0.4
+
+# JSON handling improvements
+ujson==5.8.0
+
+# Performance monitoring (optional)
+py-spy==0.3.14
+
+# Health checks
+flask-healthz==0.0.3
