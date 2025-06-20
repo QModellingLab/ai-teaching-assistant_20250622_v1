@@ -11,8 +11,8 @@ import io
 app = Flask(__name__)
 
 # LINE Bot 設定
-CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
-CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
+CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN') or os.environ.get('CHANNEL_ACCESS_TOKEN')
+CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET') or os.environ.get('CHANNEL_SECRET')
 
 line_bot_api = None
 handler = None
