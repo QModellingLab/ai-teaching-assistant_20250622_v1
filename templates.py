@@ -1,4 +1,4 @@
-# templates.py - HTML 模板
+# templates.py - 簡化版 HTML 模板
 
 HOME_TEMPLATE = '''
 <!DOCTYPE html>
@@ -6,165 +6,49 @@ HOME_TEMPLATE = '''
 <head>
     <title>個人化學習分析系統</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; }
-        
-        .header {
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            text-align: center;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        
-        h1 { 
-            color: #1f2937; 
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .subtitle { 
-            color: #6b7280; 
-            font-size: 1.1em;
-        }
-        
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .stat-card {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            text-align: center;
-            transition: transform 0.3s;
-        }
-        
-        .stat-card:hover {
-            transform: translateY(-5px);
-        }
-        
-        .stat-number {
-            font-size: 3em;
-            font-weight: bold;
-            background: linear-gradient(135deg, #6366f1, #8b5cf6);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin: 10px 0;
-        }
-        
-        .stat-label {
-            color: #6b7280;
-            font-size: 1.1em;
-        }
-        
-        .nav-buttons {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-        }
-        
-        .nav-btn {
-            background: white;
-            color: #6366f1;
-            text-decoration: none;
-            padding: 20px;
-            border-radius: 15px;
-            text-align: center;
-            font-weight: bold;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            transition: all 0.3s;
-        }
-        
-        .nav-btn:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
-        }
-        
-        .recent-activity {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            margin-top: 30px;
-        }
-        
-        .activity-item {
-            padding: 15px 0;
-            border-bottom: 1px solid #f3f4f6;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .activity-item:last-child {
-            border-bottom: none;
-        }
-        
-        .activity-text {
-            color: #374151;
-        }
-        
-        .activity-time {
-            color: #9ca3af;
-            font-size: 0.9em;
-        }
+        .header { background: white; padding: 30px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .stat-card { background: white; padding: 20px; border-radius: 10px; text-align: center; }
+        .stat-number { font-size: 2em; font-weight: bold; color: #007bff; }
+        .nav-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .nav-btn { background: #007bff; color: white; padding: 15px; text-decoration: none; border-radius: 5px; text-align: center; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🎓 個人化學習分析系統</h1>
-            <p class="subtitle">EMI 課程學生參與度追蹤與 AI 輔助分析</p>
+            <p>EMI 課程學生參與度追蹤與 AI 輔助分析</p>
         </div>
         
-        <div class="stats-grid">
+        <div class="stats">
             <div class="stat-card">
                 <div class="stat-number">{{ total_students }}</div>
-                <div class="stat-label">註冊學生</div>
+                <div>註冊學生</div>
             </div>
             <div class="stat-card">
                 <div class="stat-number">{{ total_messages }}</div>
-                <div class="stat-label">總訊息數</div>
+                <div>總訊息數</div>
             </div>
             <div class="stat-card">
                 <div class="stat-number">{{ total_questions }}</div>
-                <div class="stat-label">學生提問</div>
+                <div>學生提問</div>
             </div>
             <div class="stat-card">
                 <div class="stat-number">{{ active_today }}</div>
-                <div class="stat-label">今日活躍</div>
+                <div>今日活躍</div>
             </div>
         </div>
         
-        <div class="nav-buttons">
+        <div class="nav-links">
             <a href="/students" class="nav-btn">👥 學生列表</a>
             <a href="/analysis" class="nav-btn">📊 分析報告</a>
             <a href="/insights" class="nav-btn">💡 AI 洞察</a>
-            <a href="/export" class="nav-btn">📄 匯出數據</a>
-        </div>
-        
-        <div class="recent-activity">
-            <h3 style="margin-bottom: 20px; color: #374151;">📈 近期活動</h3>
-            {% for activity in recent_activities %}
-            <div class="activity-item">
-                <div class="activity-text">{{ activity.text }}</div>
-                <div class="activity-time">{{ activity.time }}</div>
-            </div>
-            {% endfor %}
+            <a href="/dashboard" class="nav-btn">📈 儀表板</a>
+            <a href="/export?format=csv&type=students" class="nav-btn">📄 匯出數據</a>
         </div>
     </div>
 </body>
@@ -175,129 +59,29 @@ STUDENTS_TEMPLATE = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>學生列表 - 學習分析系統</title>
+    <title>學生列表</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; }
-        
-        .header {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            text-align: center;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        
-        .back-btn {
-            background: #6366f1;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 10px;
-            text-decoration: none;
-            margin-bottom: 20px;
-            display: inline-block;
-        }
-        
-        .students-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
-        }
-        
-        .student-card {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            transition: transform 0.3s;
-        }
-        
-        .student-card:hover {
-            transform: translateY(-5px);
-        }
-        
-        .student-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        .student-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #6366f1, #8b5cf6);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 1.2em;
-            margin-right: 15px;
-        }
-        
-        .student-info h3 {
-            color: #1f2937;
-            margin-bottom: 5px;
-        }
-        
-        .student-status {
-            background: #10b981;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.8em;
-        }
-        
-        .student-stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .stat-item {
-            text-align: center;
-            padding: 15px;
-            background: #f9fafb;
-            border-radius: 10px;
-        }
-        
-        .stat-value {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #6366f1;
-        }
-        
-        .stat-title {
-            color: #6b7280;
-            font-size: 0.9em;
-            margin-top: 5px;
-        }
-        
-        .detail-btn {
-            background: #6366f1;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 10px;
-            text-decoration: none;
-            display: block;
-            text-align: center;
-            transition: background 0.3s;
-        }
-        
-        .detail-btn:hover {
-            background: #5b57e0;
-        }
+        .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
+        .students-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .student-card { background: white; padding: 20px; border-radius: 10px; position: relative; }
+        .student-card.demo { border: 2px dashed #28a745; background: #f8fff8; }
+        .demo-badge { position: absolute; top: 10px; right: 10px; background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; }
+        .student-header { display: flex; align-items: center; margin-bottom: 15px; }
+        .student-avatar { width: 50px; height: 50px; border-radius: 50%; background: #007bff; color: white; display: flex; align-items: center; justify-content: center; margin-right: 15px; font-weight: bold; }
+        .student-avatar.demo { background: #28a745; }
+        .student-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .stat-item { text-align: center; padding: 10px; background: #f8f9fa; border-radius: 5px; }
+        .detail-btn { background: #007bff; color: white; padding: 10px; text-decoration: none; border-radius: 5px; text-align: center; display: block; }
+        .filter-info { background: #e9ecef; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        .legend { display: flex; gap: 20px; margin: 10px 0; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .legend-box { width: 20px; height: 20px; border-radius: 4px; }
+        .legend-real { background: white; border: 2px solid #007bff; }
+        .legend-demo { background: #f8fff8; border: 2px dashed #28a745; }
     </style>
 </head>
 <body>
@@ -305,32 +89,62 @@ STUDENTS_TEMPLATE = '''
         <div class="header">
             <a href="/" class="back-btn">← 返回首頁</a>
             <h1>👥 學生列表</h1>
-            <p>共 {{ students|length }} 位學生</p>
+            <div class="filter-info">
+                <p><strong>學生總數：{{ students|length }}</strong></p>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-box legend-real"></div>
+                        <span>真實學生</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-box legend-demo"></div>
+                        <span>演示資料</span>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <div class="students-grid">
             {% for student in students %}
-            <div class="student-card">
+            <div class="student-card {{ 'demo' if student.name.startswith('[DEMO]') else '' }}">
+                {% if student.name.startswith('[DEMO]') %}
+                <div class="demo-badge">演示</div>
+                {% endif %}
+                
                 <div class="student-header">
-                    <div class="student-avatar">{{ student.name[0] }}</div>
-                    <div class="student-info">
-                        <h3>{{ student.name }}</h3>
-                        <span class="student-status">活躍</span>
+                    <div class="student-avatar {{ 'demo' if student.name.startswith('[DEMO]') else '' }}">
+                        {{ student.name.replace('[DEMO] ', '')[0] if student.name else '?' }}
+                    </div>
+                    <div>
+                        <h3>{{ student.name.replace('[DEMO] ', '') if student.name.startswith('[DEMO]') else (student.name or '未知用戶') }}</h3>
+                        {% if student.name.startswith('[DEMO]') %}
+                            <small style="color: #28a745; font-weight: bold;">🎭 系統演示資料</small>
+                        {% else %}
+                            <span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">
+                                {{ '活躍' if student.is_active else '不活躍' }}
+                            </span>
+                        {% endif %}
                     </div>
                 </div>
                 
                 <div class="student-stats">
                     <div class="stat-item">
-                        <div class="stat-value">{{ student.message_count }}</div>
-                        <div class="stat-title">總發言</div>
+                        <div style="font-size: 1.5em; font-weight: bold; color: #007bff;">{{ student.message_count }}</div>
+                        <div>總發言</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-value">{{ student.question_count }}</div>
-                        <div class="stat-title">提問數</div>
+                        <div style="font-size: 1.5em; font-weight: bold; color: #007bff;">{{ student.question_count }}</div>
+                        <div>提問數</div>
                     </div>
                 </div>
                 
-                <a href="/student/{{ student.id }}" class="detail-btn">查看詳細分析</a>
+                <a href="/student/{{ student.id }}" class="detail-btn">
+                    {% if student.name.startswith('[DEMO]') %}
+                        🎭 查看演示分析
+                    {% else %}
+                        📊 查看詳細分析
+                    {% endif %}
+                </a>
             </div>
             {% endfor %}
         </div>
@@ -345,209 +159,71 @@ STUDENT_DETAIL_TEMPLATE = '''
 <head>
     <title>{{ student.name }} - 學習分析</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; }
-        
-        .header {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        
-        .back-btn {
-            background: #6366f1;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 10px;
-            text-decoration: none;
-            margin-bottom: 20px;
-            display: inline-block;
-        }
-        
-        .student-profile {
-            display: flex;
-            align-items: center;
-            margin-bottom: 30px;
-        }
-        
-        .profile-avatar {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #6366f1, #8b5cf6);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 2em;
-            margin-right: 20px;
-        }
-        
-        .profile-info h1 {
-            color: #1f2937;
-            margin-bottom: 10px;
-        }
-        
-        .profile-meta {
-            color: #6b7280;
-        }
-        
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .metric-card {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            text-align: center;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        }
-        
-        .metric-value {
-            font-size: 2.5em;
-            font-weight: bold;
-            background: linear-gradient(135deg, #6366f1, #8b5cf6);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 10px;
-        }
-        
-        .metric-label {
-            color: #6b7280;
-            font-size: 1.1em;
-        }
-        
-        .analysis-section {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        
-        .section-title {
-            color: #1f2937;
-            font-size: 1.5em;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-        }
-        
-        .section-title::before {
-            content: '📊';
-            margin-right: 10px;
-        }
-        
-        .question-list {
-            background: #f9fafb;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .question-item {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            border-left: 4px solid #6366f1;
-        }
-        
-        .question-item:last-child {
-            margin-bottom: 0;
-        }
-        
-        .question-text {
-            color: #374151;
-            margin-bottom: 5px;
-        }
-        
-        .question-time {
-            color: #9ca3af;
-            font-size: 0.9em;
-        }
-        
-        .ai-insight {
-            background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
-            border-radius: 10px;
-            padding: 20px;
-            border-left: 4px solid #0ea5e9;
-        }
-        
-        .insight-text {
-            color: #0c4a6e;
-            line-height: 1.6;
-        }
+        .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
+        .profile { display: flex; align-items: center; margin: 20px 0; }
+        .avatar { width: 80px; height: 80px; border-radius: 50%; background: #007bff; color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; margin-right: 20px; }
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .metric-card { background: white; padding: 20px; border-radius: 10px; text-align: center; }
+        .metric-value { font-size: 2em; font-weight: bold; color: #007bff; }
+        .section { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .question-item { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #007bff; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <a href="/students" class="back-btn">← 返回學生列表</a>
-            
-            <div class="student-profile">
-                <div class="profile-avatar">{{ student.name[0] }}</div>
-                <div class="profile-info">
-                    <h1>{{ student.name }}</h1>
-                    <div class="profile-meta">
-                        註冊時間：{{ student.created_at.strftime('%Y-%m-%d') }} | 
-                        最後活動：{{ student.last_active.strftime('%Y-%m-%d %H:%M') if student.last_active else '無' }}
-                    </div>
+            <div class="profile">
+                <div class="avatar">{{ student.name[0] if student.name else '?' }}</div>
+                <div>
+                    <h1>{{ student.name or '未知用戶' }}</h1>
+                    <p>註冊時間：{{ student.created_at.strftime('%Y-%m-%d') }}</p>
                 </div>
             </div>
         </div>
         
-        <div class="metrics-grid">
+        <div class="metrics">
             <div class="metric-card">
                 <div class="metric-value">{{ student.message_count }}</div>
-                <div class="metric-label">總發言數</div>
+                <div>總發言數</div>
             </div>
             <div class="metric-card">
                 <div class="metric-value">{{ student.question_count }}</div>
-                <div class="metric-label">提問次數</div>
+                <div>提問次數</div>
             </div>
             <div class="metric-card">
                 <div class="metric-value">{{ "%.1f"|format(student.participation_rate) }}%</div>
-                <div class="metric-label">參與度</div>
+                <div>參與度</div>
             </div>
             <div class="metric-card">
                 <div class="metric-value">{{ "%.1f"|format(student.question_rate) }}%</div>
-                <div class="metric-label">提問率</div>
+                <div>提問率</div>
             </div>
         </div>
         
-        <div class="analysis-section">
-            <h2 class="section-title">近期提問記錄</h2>
-            <div class="question-list">
+        <div class="section">
+            <h2>📝 近期提問記錄</h2>
+            {% if recent_questions %}
                 {% for question in recent_questions %}
                 <div class="question-item">
-                    <div class="question-text">{{ question.content }}</div>
-                    <div class="question-time">{{ question.timestamp.strftime('%Y-%m-%d %H:%M') }}</div>
+                    <div>{{ question.content }}</div>
+                    <small style="color: #666;">{{ question.timestamp.strftime('%Y-%m-%d %H:%M') }}</small>
                 </div>
                 {% endfor %}
-            </div>
+            {% else %}
+                <p>尚無提問記錄</p>
+            {% endif %}
         </div>
         
         {% if ai_analysis %}
-        <div class="analysis-section">
-            <h2 class="section-title">💡 AI 分析洞察</h2>
-            <div class="ai-insight">
-                <div class="insight-text">{{ ai_analysis.content }}</div>
+        <div class="section">
+            <h2>🤖 AI 分析洞察</h2>
+            <div style="background: #e3f2fd; padding: 15px; border-radius: 5px; border-left: 4px solid #2196f3;">
+                {{ ai_analysis.content }}
             </div>
         </div>
         {% endif %}
@@ -560,87 +236,18 @@ ANALYSIS_TEMPLATE = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>分析報告 - 學習分析系統</title>
+    <title>分析報告</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; }
-        
-        .header {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            text-align: center;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        
-        .back-btn {
-            background: #6366f1;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 10px;
-            text-decoration: none;
-            margin-bottom: 20px;
-            display: inline-block;
-        }
-        
-        .report-section {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        
-        .section-title {
-            color: #1f2937;
-            font-size: 1.5em;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #6366f1;
-            padding-bottom: 10px;
-        }
-        
-        .chart-placeholder {
-            background: #f9fafb;
-            border-radius: 10px;
-            padding: 40px;
-            text-align: center;
-            color: #6b7280;
-            font-size: 1.1em;
-            margin-bottom: 20px;
-        }
-        
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-        }
-        
-        .summary-card {
-            background: #f8fafc;
-            border-radius: 10px;
-            padding: 20px;
-            text-align: center;
-        }
-        
-        .summary-number {
-            font-size: 2em;
-            font-weight: bold;
-            color: #6366f1;
-            margin-bottom: 10px;
-        }
-        
-        .summary-label {
-            color: #64748b;
-        }
+        .header { background: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+        .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
+        .section { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+        .stat-card { background: #f8f9fa; padding: 20px; border-radius: 10px; text-align: center; }
+        .stat-number { font-size: 2em; font-weight: bold; color: #007bff; }
+        .chart-placeholder { background: #f8f9fa; padding: 40px; text-align: center; border-radius: 10px; color: #666; }
     </style>
 </head>
 <body>
@@ -648,35 +255,34 @@ ANALYSIS_TEMPLATE = '''
         <div class="header">
             <a href="/" class="back-btn">← 返回首頁</a>
             <h1>📊 班級分析報告</h1>
-            <p>整體學習參與度分析</p>
         </div>
         
-        <div class="report-section">
-            <h2 class="section-title">參與度趨勢</h2>
+        <div class="section">
+            <h2>參與度趨勢</h2>
             <div class="chart-placeholder">
                 📈 參與度趨勢圖<br>
-                (可整合 Chart.js 或其他圖表庫)
+                (可整合圖表庫)
             </div>
         </div>
         
-        <div class="report-section">
-            <h2 class="section-title">整體統計</h2>
-            <div class="summary-grid">
-                <div class="summary-card">
-                    <div class="summary-number">{{ stats.avg_participation }}%</div>
-                    <div class="summary-label">平均參與度</div>
+        <div class="section">
+            <h2>整體統計</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.avg_participation or 0 }}%</div>
+                    <div>平均參與度</div>
                 </div>
-                <div class="summary-card">
-                    <div class="summary-number">{{ stats.total_questions }}</div>
-                    <div class="summary-label">總提問數</div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.total_questions or 0 }}</div>
+                    <div>總提問數</div>
                 </div>
-                <div class="summary-card">
-                    <div class="summary-number">{{ stats.active_students }}</div>
-                    <div class="summary-label">活躍學生</div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.active_students or 0 }}</div>
+                    <div>活躍學生</div>
                 </div>
-                <div class="summary-card">
-                    <div class="summary-number">{{ stats.avg_questions_per_student }}</div>
-                    <div class="summary-label">人均提問</div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.avg_questions_per_student or 0 }}</div>
+                    <div>人均提問</div>
                 </div>
             </div>
         </div>
@@ -689,101 +295,18 @@ INSIGHTS_TEMPLATE = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI 洞察 - 學習分析系統</title>
+    <title>AI 洞察</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; }
-        
-        .header {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            text-align: center;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        
-        .back-btn {
-            background: #6366f1;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 10px;
-            text-decoration: none;
-            margin-bottom: 20px;
-            display: inline-block;
-        }
-        
-        .insight-card {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            margin-bottom: 25px;
-        }
-        
-        .insight-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        .insight-icon {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #6366f1, #8b5cf6);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 1.5em;
-            margin-right: 15px;
-        }
-        
-        .insight-meta {
-            flex: 1;
-        }
-        
-        .insight-title {
-            color: #1f2937;
-            font-size: 1.3em;
-            margin-bottom: 5px;
-        }
-        
-        .insight-time {
-            color: #6b7280;
-            font-size: 0.9em;
-        }
-        
-        .insight-content {
-            color: #374151;
-            line-height: 1.6;
-            font-size: 1.1em;
-        }
-        
-        .insight-type {
-            background: #ddd6fe;
-            color: #7c3aed;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.8em;
-            font-weight: bold;
-        }
-        
-        .no-insights {
-            text-align: center;
-            color: #6b7280;
-            font-size: 1.1em;
-            padding: 40px;
-        }
+        .header { background: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+        .back-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
+        .insight-card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .insight-header { display: flex; align-items: center; margin-bottom: 15px; }
+        .insight-icon { width: 40px; height: 40px; background: #007bff; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 15px; }
+        .insight-content { line-height: 1.6; }
+        .no-insights { text-align: center; padding: 40px; color: #666; }
     </style>
 </head>
 <body>
@@ -791,7 +314,6 @@ INSIGHTS_TEMPLATE = '''
         <div class="header">
             <a href="/" class="back-btn">← 返回首頁</a>
             <h1>💡 AI 洞察報告</h1>
-            <p>智能分析學習模式與建議</p>
         </div>
         
         {% if insights %}
@@ -799,26 +321,13 @@ INSIGHTS_TEMPLATE = '''
             <div class="insight-card">
                 <div class="insight-header">
                     <div class="insight-icon">🤖</div>
-                    <div class="insight-meta">
-                        <div class="insight-title">{{ insight.title }}</div>
-                        <div class="insight-time">
-                            {{ insight.created_at.strftime('%Y-%m-%d %H:%M') }}
-                            <span class="insight-type">{{ insight.analysis_type }}</span>
-                        </div>
+                    <div>
+                        <h3>{{ insight.title or '學習分析' }}</h3>
+                        <small>{{ insight.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
                     </div>
                 </div>
                 <div class="insight-content">{{ insight.content }}</div>
             </div>
             {% endfor %}
         {% else %}
-            <div class="insight-card">
-                <div class="no-insights">
-                    🔍 尚無 AI 洞察報告<br>
-                    系統會在收集足夠數據後自動生成分析
-                </div>
-            </div>
-        {% endif %}
-    </div>
-</body>
-</html>
-'''
+            <div
