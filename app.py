@@ -1258,10 +1258,9 @@ if WEB_TEMPLATES_AVAILABLE:
                 'success': False,
                 'error': str(e),
                 'source': 'database_error'
-            }
-# app.py - Part 4: Final Routes, Error Handling, and Startup
-
             }), 500
+            
+# app.py - Part 4: Final Routes, Error Handling, and Startup
 
     @app.route('/api/real-conversation-data')
     def api_real_conversation_data():
