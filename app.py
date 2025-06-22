@@ -708,54 +708,61 @@ def not_found_error(error):
     if request.path.startswith('/api/'):
         return {'error': 'Not found'}, 404
     
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="zh-TW">
-    <head>
-        <meta charset="UTF-8">
-        <title>系統錯誤 - EMI 智能教學助理</title>
-        <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-                color: white;
-                text-align: center;
-                padding: 100px 20px;
-                margin: 0;
-            }
-            .error-container {
-                max-width: 600px;
-                margin: 0 auto;
-                background: rgba(255, 255, 255, 0.1);
-                padding: 40px;
-                border-radius: 15px;
-                backdrop-filter: blur(10px);
-            }
-            h1 { font-size: 3em; margin-bottom: 20px; }
-            p { font-size: 1.2em; margin-bottom: 30px; }
-            a {
-                background: rgba(255, 255, 255, 0.2);
-                color: white;
-                padding: 15px 30px;
-                text-decoration: none;
-                border-radius: 25px;
-                transition: all 0.3s ease;
-            }
-            a:hover {
-                background: rgba(255, 255, 255, 0.3);
-                transform: translateY(-2px);
-            }
-        </style>
-    </head>
-    <body>
-        <div class="error-container">
-            <h1>500</h1>
-            <p>系統發生內部錯誤，請稍後再試</p>
-            <a href="/">返回首頁</a>
-        </div>
-    </body>
-    </html>
-    """), 500
+@app.errorhandler(500)
+def internal_error(error):
+    """500 錯誤處理"""
+    logger.error(f"Internal server error: {error}")
+    if request.path.startswith('/api/'):
+        return {'error': 'Internal server error'}, 500
+    
+    error_html = """<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>系統錯誤 - EMI 智能教學助理</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+            text-align: center;
+            padding: 100px 20px;
+            margin: 0;
+        }
+        .error-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        h1 { font-size: 3em; margin-bottom: 20px; }
+        p { font-size: 1.2em; margin-bottom: 30px; }
+        a {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+        }
+        a:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <h1>500</h1>
+        <p>系統發生內部錯誤，請稍後再試</p>
+        <a href="/">返回首頁</a>
+    </div>
+</body>
+</html>"""
+    
+    return render_template_string(error_html), 500
 
 # =================== 初始化和啟動 ===================
 
