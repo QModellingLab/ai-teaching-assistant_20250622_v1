@@ -498,7 +498,7 @@ if WEB_TEMPLATES_AVAILABLE:
                                         students=students_list,
                                         current_time=datetime.datetime.now())
                                     
-    except Exception as e:
+        except Exception as e:
         logger.error(f"學生頁面錯誤: {e}")
         # 返回空頁面而不崩潰
         return render_template_string(STUDENTS_TEMPLATE,
