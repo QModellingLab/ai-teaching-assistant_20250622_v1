@@ -1,4 +1,4 @@
-# app.py - EMI 智能教學助理 (修正版本)
+# app.py - EMI 智能教學助理 (完全修復版本)
 
 import os
 import json
@@ -78,15 +78,12 @@ except Exception as e:
 def sync_student_stats(student):
     """同步學生統計資料"""
     try:
-        # 取得所有該學生的訊息
         all_messages = list(Message.select().where(Message.student == student))
         
-        # 計算實際統計
         total_messages = len(all_messages)
         questions = [m for m in all_messages if m.message_type == 'question']
         question_count = len(questions)
         
-        # 計算活躍天數
         if all_messages:
             message_dates = set(m.timestamp.date() for m in all_messages)
             active_days = len(message_dates)
@@ -95,11 +92,9 @@ def sync_student_stats(student):
             active_days = 0
             last_active = student.created_at or datetime.datetime.now()
         
-        # 計算參與度和提問率
         participation_rate = min(100, total_messages * 10) if total_messages else 0
         question_rate = (question_count / max(total_messages, 1)) * 100
         
-        # 更新學生記錄（如果有變化）
         if (student.message_count != total_messages or 
             student.question_count != question_count or
             abs(student.participation_rate - participation_rate) > 1):
@@ -136,7 +131,6 @@ def get_database_stats():
             Student.last_active >= datetime.datetime.now().date()
         ).count()
         
-        # 同步所有學生統計
         students = list(Student.select())
         total_participation = 0
         valid_students = 0
@@ -172,7 +166,6 @@ def get_database_stats():
 
 def get_database_students():
     """從資料庫獲取學生資料並同步統計"""
-    # 修復：簡化此函數以避免複雜性
     return []
 
 def get_recent_messages():
@@ -216,7 +209,7 @@ def callback():
     
     return 'OK'
 
-if handler:  # 只有在 handler 存在時才註冊事件處理器
+if handler:
     @handler.add(MessageEvent, message=TextMessage)
     def handle_message(event):
         """處理 LINE 訊息事件"""
@@ -226,26 +219,18 @@ if handler:  # 只有在 handler 存在時才註冊事件處理器
             
             logger.info(f"收到訊息: {user_id} - {message_text}")
             
-            # 取得或建立學生記錄
             student = get_or_create_student(user_id, event)
-            
-            # 記錄訊息
             save_message(student, message_text, event)
-            
-            # 同步學生統計
             sync_student_stats(student)
             
-            # 處理 AI 回應
             if message_text.startswith('@AI') or event.source.type == 'user':
                 handle_ai_request(event, student, message_text)
             
-            # 進行週期性分析
-            if student.message_count % 5 == 0:  # 每5則訊息分析一次
+            if student.message_count % 5 == 0:
                 perform_periodic_analysis(student)
                 
         except Exception as e:
             logger.error(f"處理訊息時發生錯誤: {e}")
-            # 回傳錯誤訊息給用戶
             try:
                 if line_bot_api:
                     line_bot_api.reply_message(
@@ -259,12 +244,10 @@ def get_or_create_student(user_id, event):
     """取得或建立學生記錄"""
     try:
         student = Student.get(Student.line_user_id == user_id)
-        # 更新最後活動時間
         student.last_active = datetime.datetime.now()
         student.save()
         return student
     except Student.DoesNotExist:
-        # 嘗試取得用戶資料
         try:
             if line_bot_api:
                 profile = line_bot_api.get_profile(user_id)
@@ -274,7 +257,6 @@ def get_or_create_student(user_id, event):
         except:
             display_name = f"User_{user_id[:8]}"
         
-        # 建立新學生記錄
         student = Student.create(
             name=display_name,
             line_user_id=user_id,
@@ -291,10 +273,8 @@ def get_or_create_student(user_id, event):
 
 def save_message(student, message_text, event):
     """儲存訊息記錄"""
-    # 判斷訊息類型
     is_question = is_question_message(message_text)
     
-    # 儲存訊息
     message = Message.create(
         student=student,
         content=message_text,
@@ -323,16 +303,13 @@ def is_question_message(text):
 def handle_ai_request(event, student, message_text):
     """處理 AI 請求"""
     try:
-        # 移除 @AI 前綴（如果有的話）
         query = message_text.replace('@AI', '').strip()
         if not query:
             query = message_text
         
-        # 取得 AI 回應
         ai_response = get_ai_response(query, student.id)
         
         if ai_response and line_bot_api:
-            # 儲存 AI 回應記錄
             AIResponse.create(
                 student=student,
                 query=query,
@@ -341,7 +318,6 @@ def handle_ai_request(event, student, message_text):
                 response_type='gemini'
             )
             
-            # 回傳給用戶
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text=ai_response)
@@ -371,7 +347,6 @@ def perform_periodic_analysis(student):
     try:
         analysis_result = analyze_student_patterns(student.id)
         if analysis_result:
-            # 儲存分析結果
             Analysis.create(
                 student=student,
                 analysis_type='pattern_analysis',
@@ -400,13 +375,11 @@ if WEB_TEMPLATES_AVAILABLE:
 
     @app.route('/students')
     def students():
-        """學生列表頁面 - 修復版本"""
+        """學生列表頁面"""
         try:
-            # 直接使用簡單查詢，避免複雜統計
             students_list = []
             
             for student in Student.select().order_by(Student.id.asc()):
-                # 使用資料庫現有資料，不進行重新計算
                 students_list.append({
                     'id': student.id,
                     'name': student.name,
@@ -430,18 +403,16 @@ if WEB_TEMPLATES_AVAILABLE:
                                     
         except Exception as e:
             logger.error(f"學生頁面錯誤: {e}")
-            # 返回空頁面而不崩潰
             return render_template_string(STUDENTS_TEMPLATE,
                                         students=[],
                                         current_time=datetime.datetime.now())
 
     @app.route('/student/<int:student_id>')
     def student_detail(student_id):
-        """學生詳細頁面 - 完全整合版本"""
+        """學生詳細頁面"""
         try:
             student_record = Student.get_by_id(student_id)
             
-            # 同步學生統計
             stats = sync_student_stats(student_record)
             if not stats:
                 stats = {
@@ -453,14 +424,12 @@ if WEB_TEMPLATES_AVAILABLE:
                     'last_active': datetime.datetime.now()
                 }
             
-            # 獲取學生訊息（最新20則）
             all_messages = list(Message.select().where(
                 Message.student == student_record
             ).order_by(Message.timestamp.desc()))
             
             display_messages = []
             for msg in all_messages[:20]:
-                # 計算相對時間
                 time_diff = datetime.datetime.now() - msg.timestamp
                 if time_diff.days > 0:
                     time_display = f"{time_diff.days} 天前"
@@ -480,14 +449,12 @@ if WEB_TEMPLATES_AVAILABLE:
                     'message_type': msg.message_type
                 })
             
-            # 學習分析
             try:
                 analysis = analyze_student_patterns(student_id)
             except Exception as e:
                 logger.warning(f"AI 分析失敗: {e}")
                 analysis = None
             
-            # 對話摘要
             try:
                 from utils import get_student_conversation_summary
                 conversation_summary = get_student_conversation_summary(student_id, days=30)
@@ -495,7 +462,6 @@ if WEB_TEMPLATES_AVAILABLE:
                 logger.warning(f"對話摘要生成失敗: {e}")
                 conversation_summary = None
             
-            # 準備學生資料
             student_data = {
                 'id': student_record.id,
                 'name': student_record.name,
@@ -546,7 +512,7 @@ if WEB_TEMPLATES_AVAILABLE:
     @app.route('/conversation-summaries')
     def conversation_summaries():
         """對話摘要頁面"""
-        summaries = []  # 使用示範資料
+        summaries = []
         insights = {
             'total_conversations': Message.select().count(),
             'avg_length': 8.5,
@@ -561,7 +527,7 @@ if WEB_TEMPLATES_AVAILABLE:
     @app.route('/learning-recommendations')
     def learning_recommendations():
         """學習建議頁面"""
-        recommendations = []  # 使用示範資料
+        recommendations = []
         overview = {
             'total_recommendations': 24,
             'high_priority': 8,
@@ -702,80 +668,125 @@ def sync_all_students():
 
 # =================== 錯誤處理 ===================
 
+ERROR_404_HTML = '''<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>頁面未找到 - EMI 智能教學助理</title>
+<style>
+body {
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+color: white;
+text-align: center;
+padding: 100px 20px;
+margin: 0;
+}
+.error-container {
+max-width: 600px;
+margin: 0 auto;
+background: rgba(255, 255, 255, 0.1);
+padding: 40px;
+border-radius: 15px;
+backdrop-filter: blur(10px);
+}
+h1 { font-size: 3em; margin-bottom: 20px; }
+p { font-size: 1.2em; margin-bottom: 30px; }
+a {
+background: rgba(255, 255, 255, 0.2);
+color: white;
+padding: 15px 30px;
+text-decoration: none;
+border-radius: 25px;
+transition: all 0.3s ease;
+}
+a:hover {
+background: rgba(255, 255, 255, 0.3);
+transform: translateY(-2px);
+}
+</style>
+</head>
+<body>
+<div class="error-container">
+<h1>404</h1>
+<p>抱歉，您請求的頁面不存在</p>
+<a href="/">返回首頁</a>
+</div>
+</body>
+</html>'''
+
+ERROR_500_HTML = '''<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>系統錯誤 - EMI 智能教學助理</title>
+<style>
+body {
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+color: white;
+text-align: center;
+padding: 100px 20px;
+margin: 0;
+}
+.error-container {
+max-width: 600px;
+margin: 0 auto;
+background: rgba(255, 255, 255, 0.1);
+padding: 40px;
+border-radius: 15px;
+backdrop-filter: blur(10px);
+}
+h1 { font-size: 3em; margin-bottom: 20px; }
+p { font-size: 1.2em; margin-bottom: 30px; }
+a {
+background: rgba(255, 255, 255, 0.2);
+color: white;
+padding: 15px 30px;
+text-decoration: none;
+border-radius: 25px;
+transition: all 0.3s ease;
+}
+a:hover {
+background: rgba(255, 255, 255, 0.3);
+transform: translateY(-2px);
+}
+</style>
+</head>
+<body>
+<div class="error-container">
+<h1>500</h1>
+<p>系統發生內部錯誤，請稍後再試</p>
+<a href="/">返回首頁</a>
+</div>
+</body>
+</html>'''
+
 @app.errorhandler(404)
 def not_found_error(error):
     """404 錯誤處理"""
     if request.path.startswith('/api/'):
         return {'error': 'Not found'}, 404
-    
+    return render_template_string(ERROR_404_HTML), 404
+
 @app.errorhandler(500)
 def internal_error(error):
     """500 錯誤處理"""
     logger.error(f"Internal server error: {error}")
     if request.path.startswith('/api/'):
         return {'error': 'Internal server error'}, 500
-    
-    error_html = """<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <title>系統錯誤 - EMI 智能教學助理</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-            color: white;
-            text-align: center;
-            padding: 100px 20px;
-            margin: 0;
-        }
-        .error-container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 40px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-        }
-        h1 { font-size: 3em; margin-bottom: 20px; }
-        p { font-size: 1.2em; margin-bottom: 30px; }
-        a {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 15px 30px;
-            text-decoration: none;
-            border-radius: 25px;
-            transition: all 0.3s ease;
-        }
-        a:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
-        }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <h1>500</h1>
-        <p>系統發生內部錯誤，請稍後再試</p>
-        <a href="/">返回首頁</a>
-    </div>
-</body>
-</html>"""
-    
-    return render_template_string(error_html), 500
+    return render_template_string(ERROR_500_HTML), 500
 
 # =================== 初始化和啟動 ===================
 
 def initialize_sample_data():
     """初始化範例資料"""
     try:
-        # 檢查是否已有資料
         if Student.select().count() == 0:
             logger.info("建立範例資料...")
             create_sample_data()
             logger.info("範例資料建立完成")
         
-        # 同步所有學生統計
         students = list(Student.select())
         for student in students:
             sync_student_stats(student)
@@ -825,59 +836,3 @@ if __name__ == "__main__":
 
 # WSGI 應用程式入口點（用於生產環境）
 application = app
-        <title>頁面未找到 - EMI 智能教學助理</title>
-        <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                text-align: center;
-                padding: 100px 20px;
-                margin: 0;
-            }
-            .error-container {
-                max-width: 600px;
-                margin: 0 auto;
-                background: rgba(255, 255, 255, 0.1);
-                padding: 40px;
-                border-radius: 15px;
-                backdrop-filter: blur(10px);
-            }
-            h1 { font-size: 3em; margin-bottom: 20px; }
-            p { font-size: 1.2em; margin-bottom: 30px; }
-            a {
-                background: rgba(255, 255, 255, 0.2);
-                color: white;
-                padding: 15px 30px;
-                text-decoration: none;
-                border-radius: 25px;
-                transition: all 0.3s ease;
-            }
-            a:hover {
-                background: rgba(255, 255, 255, 0.3);
-                transform: translateY(-2px);
-            }
-        </style>
-    </head>
-    <body>
-        <div class="error-container">
-            <h1>404</h1>
-            <p>抱歉，您請求的頁面不存在</p>
-            <a href="/">返回首頁</a>
-        </div>
-    </body>
-    </html>
-    """), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    """500 錯誤處理"""
-    logger.error(f"Internal server error: {error}")
-    if request.path.startswith('/api/'):
-        return {'error': 'Internal server error'}, 500
-    
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="zh-TW">
-    <head>
-        <meta charset="UTF-8">
