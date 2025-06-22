@@ -1,794 +1,735 @@
-# app_fixed.py - 修復版應用程式
+# app.py - EMI 智能教學助理 (修正版本)
+
 import os
 import json
 import datetime
 import logging
 from flask import Flask, request, abort, render_template_string, jsonify
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError, LineBotApiError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
-# 設定更詳細的日誌
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# 導入自定義模組
+from models import db, Student, Message, Analysis, AIResponse, initialize_db
+from utils import (
+    get_ai_response, 
+    analyze_student_patterns, 
+    update_student_stats,
+    create_sample_data
 )
+
+# 導入 Web 管理後台模板
+try:
+    from templates_main import INDEX_TEMPLATE, STUDENTS_TEMPLATE, STUDENT_DETAIL_TEMPLATE
+    from templates_analysis_part1 import TEACHING_INSIGHTS_TEMPLATE
+    from templates_analysis_part2 import CONVERSATION_SUMMARIES_TEMPLATE
+    from templates_analysis_part3 import LEARNING_RECOMMENDATIONS_TEMPLATE
+    from templates_management import STORAGE_MANAGEMENT_TEMPLATE, DATA_EXPORT_TEMPLATE
+    WEB_TEMPLATES_AVAILABLE = True
+    logging.info("Web 管理後台模板載入成功")
+except ImportError as e:
+    WEB_TEMPLATES_AVAILABLE = False
+    logging.warning(f"Web 管理後台模板載入失敗: {e}")
+
+# 設定日誌
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Flask 應用初始化
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key-change-this')
 
-# 全域變數
-db = None
-Student = None
-Message = None
-Analysis = None
-WEB_TEMPLATES_AVAILABLE = False
-line_bot_api = None
-handler = None
+# 環境變數設定
+CHANNEL_ACCESS_TOKEN = os.getenv('CHANNEL_ACCESS_TOKEN') or os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+CHANNEL_SECRET = os.getenv('CHANNEL_SECRET') or os.getenv('LINE_CHANNEL_SECRET')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-def safe_import_models():
-    """安全地導入模型"""
-    global db, Student, Message, Analysis
-    try:
-        from models import db, Student, Message, Analysis, initialize_db
-        initialize_db()
-        logger.info("✅ 模型導入成功")
-        return True
-    except Exception as e:
-        logger.error(f"❌ 模型導入失敗: {e}")
-        return False
+if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
+    logger.error("Missing LINE Bot credentials")
+    logger.info("請檢查環境變數: CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET")
+else:
+    logger.info("LINE Bot 憑證已載入")
 
-def safe_import_templates():
-    """安全地導入模板"""
-    global WEB_TEMPLATES_AVAILABLE
-    try:
-        from templates_main import INDEX_TEMPLATE
-        from templates_analysis_part1 import TEACHING_INSIGHTS_TEMPLATE
-        WEB_TEMPLATES_AVAILABLE = True
-        logger.info("✅ 模板導入成功")
-        return True
-    except Exception as e:
-        logger.error(f"❌ 模板導入失敗: {e}")
-        WEB_TEMPLATES_AVAILABLE = False
-        return False
+if not GEMINI_API_KEY:
+    logger.error("Missing Gemini API key")
+    logger.info("請檢查環境變數: GEMINI_API_KEY")
+else:
+    logger.info("Gemini API 金鑰已載入")
 
-def safe_import_linebot():
-    """安全地導入 LINE Bot"""
-    global line_bot_api, handler
+# LINE Bot API 初始化
+if CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET:
+    line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+    handler = WebhookHandler(CHANNEL_SECRET)
+    logger.info("LINE Bot API 初始化成功")
+else:
+    line_bot_api = None
+    handler = None
+    logger.warning("LINE Bot API 未初始化")
+
+# 初始化資料庫
+try:
+    initialize_db()
+    logger.info("資料庫初始化成功")
+except Exception as e:
+    logger.error(f"資料庫初始化失敗: {e}")
+
+# =================== 輔助函數 ===================
+
+def sync_student_stats(student):
+    """同步學生統計資料"""
     try:
-        CHANNEL_ACCESS_TOKEN = os.getenv('CHANNEL_ACCESS_TOKEN') or os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
-        CHANNEL_SECRET = os.getenv('CHANNEL_SECRET') or os.getenv('LINE_CHANNEL_SECRET')
+        # 取得所有該學生的訊息
+        all_messages = list(Message.select().where(Message.student == student))
         
-        if CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET:
-            from linebot import LineBotApi, WebhookHandler
-            line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
-            handler = WebhookHandler(CHANNEL_SECRET)
-            logger.info("✅ LINE Bot 初始化成功")
-            return True
+        # 計算實際統計
+        total_messages = len(all_messages)
+        questions = [m for m in all_messages if m.message_type == 'question']
+        question_count = len(questions)
+        
+        # 計算活躍天數
+        if all_messages:
+            message_dates = set(m.timestamp.date() for m in all_messages)
+            active_days = len(message_dates)
+            last_active = max(all_messages, key=lambda x: x.timestamp).timestamp
         else:
-            logger.warning("⚠️ LINE Bot 憑證未設定")
-            return False
-    except Exception as e:
-        logger.error(f"❌ LINE Bot 初始化失敗: {e}")
-        return False
-
-# 備用模板
-FALLBACK_INDEX_TEMPLATE = '''
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EMI 智能教學助理 - 系統檢查</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 40px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .header h1 {
-            color: #2c3e50;
-            margin-bottom: 10px;
-        }
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-        }
-        .status-card {
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-        }
-        .status-ok { background: #d4edda; border-left: 4px solid #28a745; }
-        .status-warning { background: #fff3cd; border-left: 4px solid #ffc107; }
-        .status-error { background: #f8d7da; border-left: 4px solid #dc3545; }
-        .nav-links {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin: 30px 0;
-        }
-        .nav-link {
-            background: #007bff;
-            color: white;
-            padding: 15px;
-            text-decoration: none;
-            border-radius: 8px;
-            text-align: center;
-            transition: background 0.3s;
-        }
-        .nav-link:hover {
-            background: #0056b3;
-            text-decoration: none;
-            color: white;
-        }
-        .system-info {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 10px;
-            margin: 20px 0;
-        }
-        .info-item {
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            padding: 5px 0;
-            border-bottom: 1px solid #dee2e6;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🎓 EMI 智能教學助理</h1>
-            <p>系統狀態檢查</p>
-        </div>
+            active_days = 0
+            last_active = student.created_at or datetime.datetime.now()
         
-        <div class="status-grid">
-            <div class="status-card {{ 'status-ok' if system_status.database == 'connected' else 'status-error' }}">
-                <h3>🗄️ 資料庫</h3>
-                <p>{{ system_status.database }}</p>
-            </div>
+        # 計算參與度和提問率
+        participation_rate = min(100, total_messages * 10) if total_messages else 0
+        question_rate = (question_count / max(total_messages, 1)) * 100
+        
+        # 更新學生記錄（如果有變化）
+        if (student.message_count != total_messages or 
+            student.question_count != question_count or
+            abs(student.participation_rate - participation_rate) > 1):
             
-            <div class="status-card {{ 'status-ok' if system_status.templates else 'status-warning' }}">
-                <h3>🎨 模板系統</h3>
-                <p>{{ '正常' if system_status.templates else '簡化模式' }}</p>
-            </div>
+            student.message_count = total_messages
+            student.question_count = question_count
+            student.question_rate = question_rate
+            student.participation_rate = participation_rate
+            student.last_active = last_active
+            student.save()
             
-            <div class="status-card {{ 'status-ok' if system_status.linebot else 'status-warning' }}">
-                <h3>📱 LINE Bot</h3>
-                <p>{{ '已配置' if system_status.linebot else '未配置' }}</p>
-            </div>
+            logger.info(f"✅ 同步學生統計: {student.name}")
+        
+        return {
+            'total_messages': total_messages,
+            'question_count': question_count,
+            'participation_rate': participation_rate,
+            'question_rate': question_rate,
+            'active_days': active_days,
+            'last_active': last_active
+        }
+        
+    except Exception as e:
+        logger.error(f"同步學生統計錯誤: {e}")
+        return None
+
+def get_database_stats():
+    """從資料庫獲取真實統計資料"""
+    try:
+        total_students = Student.select().count()
+        total_messages = Message.select().count()
+        total_questions = Message.select().where(Message.message_type == 'question').count()
+        active_today = Student.select().where(
+            Student.last_active >= datetime.datetime.now().date()
+        ).count()
+        
+        # 同步所有學生統計
+        students = list(Student.select())
+        total_participation = 0
+        valid_students = 0
+        
+        for student in students:
+            stats = sync_student_stats(student)
+            if stats:
+                total_participation += stats['participation_rate']
+                valid_students += 1
+        
+        avg_engagement = total_participation / max(valid_students, 1)
+        
+        return {
+            'total_students': total_students,
+            'active_conversations': active_today,
+            'total_messages': total_messages,
+            'avg_engagement': round(avg_engagement, 1),
+            'active_students': active_today,
+            'avg_response_time': '2.3',
+            'system_load': '正常'
+        }
+    except Exception as e:
+        logger.error(f"獲取資料庫統計時發生錯誤: {e}")
+        return {
+            'total_students': 0,
+            'active_conversations': 0,
+            'total_messages': 0,
+            'avg_engagement': 0,
+            'active_students': 0,
+            'avg_response_time': '0',
+            'system_load': '錯誤'
+        }
+
+def get_database_students():
+    """從資料庫獲取學生資料並同步統計"""
+    try:
+        students_data = []
+        for student in Student.select().order_by(Student.last_active.desc()):
+            # 同步統計資料
+            stats = sync_student_stats(student)
             
-            <div class="status-card {{ 'status-ok' if system_status.ai else 'status-warning' }}">
-                <h3>🤖 AI 服務</h3>
-                <p>{{ '已配置' if system_status.ai else '未配置' }}</p>
-            </div>
-        </div>
+            if stats:
+                # 計算最後活動時間的相對描述
+                time_diff = datetime.datetime.now() - stats['last_active']
+                if time_diff.days > 0:
+                    last_active = f"{time_diff.days} 天前"
+                elif time_diff.seconds > 3600:
+                    hours = time_diff.seconds // 3600
+                    last_active = f"{hours} 小時前"
+                elif time_diff.seconds > 60:
+                    minutes = time_diff.seconds // 60
+                    last_active = f"{minutes} 分鐘前"
+                else:
+                    last_active = "剛剛"
+            else:
+                last_active = "未知"
+                stats = {
+                    'total_messages': 0,
+                    'question_count': 0,
+                    'participation_rate': 0,
+                    'active_days': 0
+                }
+            
+            # 判斷表現等級
+            participation_rate = stats['participation_rate']
+            if participation_rate >= 80:
+                performance_level = 'excellent'
+                performance_text = '優秀'
+            elif participation_rate >= 60:
+                performance_level = 'good'
+                performance_text = '良好'
+            elif participation_rate >= 40:
+                performance_level = 'average'
+                performance_text = '普通'
+            else:
+                performance_level = 'needs-attention'
+                performance_text = '需關注'
+            
+            # 判斷活動狀態
+            if time_diff.days < 1:
+                status = 'active'
+            elif time_diff.days < 7:
+                status = 'moderate'
+            else:
+                status = 'inactive'
+            
+            students_data.append({
+                'id': student.id,
+                'name': student.name,
+                'email': student.line_user_id or 'N/A',
+                'total_messages': stats['total_messages'],
+                'engagement_score': stats['participation_rate'],
+                'last_active': last_active,
+                'status': status,
+                'engagement': int(stats['participation_rate']),
+                'questions_count': stats['question_count'],
+                'progress': int(stats['participation_rate']),
+                'performance_level': performance_level,
+                'performance_text': performance_text,
+                'active_days': stats.get('active_days', 0),
+                'participation_rate': stats['participation_rate']
+            })
         
-        <div class="system-info">
-            <h3>📊 系統資訊</h3>
-            <div class="info-item">
-                <span>總學生數：</span>
-                <span>{{ stats.total_students or 0 }}</span>
-            </div>
-            <div class="info-item">
-                <span>總訊息數：</span>
-                <span>{{ stats.total_messages or 0 }}</span>
-            </div>
-            <div class="info-item">
-                <span>系統時間：</span>
-                <span>{{ current_time.strftime('%Y-%m-%d %H:%M:%S') }}</span>
-            </div>
-            <div class="info-item">
-                <span>運行模式：</span>
-                <span>{{ '完整模式' if system_status.templates else '簡化模式' }}</span>
-            </div>
-        </div>
-        
-        <div class="nav-links">
-            <a href="/health" class="nav-link">🏥 健康檢查</a>
-            <a href="/stats" class="nav-link">📈 統計資料</a>
-            {% if system_status.database == 'connected' %}
-            <a href="/students" class="nav-link">👥 學生列表</a>
-            {% endif %}
-            <a href="/api/sync-all-students" class="nav-link">🔄 同步資料</a>
-        </div>
-        
-        {% if not system_status.templates %}
-        <div style="background: #fff3cd; padding: 20px; border-radius: 10px; border-left: 4px solid #ffc107;">
-            <strong>⚠️ 注意：</strong>系統正在簡化模式下運行。部分功能可能不可用。
-            請檢查模板檔案是否正確部署。
-        </div>
-        {% endif %}
-    </div>
-</body>
-</html>
-'''
-
-FALLBACK_STUDENTS_TEMPLATE = '''
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <title>學生列表 - EMI 智能教學助理</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 40px;
-            background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
-            color: #333;
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-        .back-btn {
-            background: #007bff;
-            color: white;
-            padding: 10px 20px;
-            text-decoration: none;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: inline-block;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-            background: white;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-        th, td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #dee2e6;
-        }
-        th {
-            background: #f8f9fa;
-            font-weight: 600;
-            color: #495057;
-        }
-        tr:hover {
-            background: #f8f9fa;
-        }
-        .demo-badge {
-            background: #28a745;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.8em;
-        }
-        .view-link {
-            background: #007bff;
-            color: white;
-            padding: 5px 10px;
-            text-decoration: none;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-        .view-link:hover {
-            background: #0056b3;
-            text-decoration: none;
-            color: white;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <a href="/" class="back-btn">← 返回首頁</a>
-        <h1>👥 學生管理</h1>
-        <p>查看所有學生的學習狀況</p>
-        
-        <table>
-            <thead>
-                <tr>
-                    <th>姓名</th>
-                    <th>參與度</th>
-                    <th>訊息數</th>
-                    <th>問題數</th>
-                    <th>最後活動</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for student in students %}
-                <tr>
-                    <td>
-                        {{ student.name }}
-                        {% if student.name.startswith('[DEMO]') %}
-                            <span class="demo-badge">演示</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ "%.1f"|format(student.participation_rate) }}%</td>
-                    <td>{{ student.message_count }}</td>
-                    <td>{{ student.question_count }}</td>
-                    <td>
-                        {% if student.last_active %}
-                            {{ student.last_active.strftime('%m-%d %H:%M') }}
-                        {% else %}
-                            無記錄
-                        {% endif %}
-                    </td>
-                    <td>
-                        <a href="/student/{{ student.id }}" class="view-link">查看詳情</a>
-                    </td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="6" style="text-align: center; color: #666; padding: 40px;">
-                        暫無學生資料。<br>
-                        <small>當學生開始使用系統後，這裡將顯示他們的資料。</small>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</body>
-</html>
-'''
-
-def get_system_status():
-    """取得系統狀態"""
-    status = {
-        'database': 'disconnected',
-        'templates': WEB_TEMPLATES_AVAILABLE,
-        'linebot': line_bot_api is not None,
-        'ai': bool(os.getenv('GEMINI_API_KEY'))
-    }
-    
-    try:
-        if db and not db.is_closed():
-            status['database'] = 'connected'
-        elif db:
-            db.connect()
-            status['database'] = 'connected'
-    except:
-        status['database'] = 'error'
-    
-    return status
-
-def get_safe_stats():
-    """安全地取得統計資料"""
-    try:
-        if Student and db and not db.is_closed():
-            total_students = Student.select().count()
-            total_messages = Message.select().count() if Message else 0
-            return {
-                'total_students': total_students,
-                'total_messages': total_messages,
-                'avg_engagement': 0
-            }
-    except:
-        pass
-    
-    return {
-        'total_students': 0,
-        'total_messages': 0,
-        'avg_engagement': 0
-    }
-
-def get_safe_students():
-    """安全地取得學生列表"""
-    try:
-        if Student and db and not db.is_closed():
-            students = list(Student.select().order_by(Student.last_active.desc()))
-            return students
+        return students_data
     except Exception as e:
-        logger.error(f"取得學生列表錯誤: {e}")
+        logger.error(f"獲取學生資料時發生錯誤: {e}")
+        return []
+
+def get_recent_messages():
+    """獲取最近訊息"""
+    try:
+        recent = []
+        for message in Message.select().join(Student).order_by(Message.timestamp.desc()).limit(10):
+            recent.append({
+                'student': {'name': message.student.name},
+                'timestamp': message.timestamp,
+                'message_type': message.message_type.title(),
+                'content': message.content
+            })
+        return recent
+    except Exception as e:
+        logger.error(f"獲取最近訊息時發生錯誤: {e}")
+        return []
+
+# =================== LINE Bot 功能 ===================
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    """LINE Bot Webhook 處理"""
+    if not handler:
+        logger.error("LINE Bot handler 未初始化")
+        abort(500)
     
-    return []
-
-# 路由定義
-@app.route('/')
-def index():
-    """首頁"""
+    signature = request.headers.get('X-Line-Signature', '')
+    body = request.get_data(as_text=True)
+    
+    logger.info(f"Request body: {body}")
+    
     try:
-        system_status = get_system_status()
-        stats = get_safe_stats()
-        
-        if WEB_TEMPLATES_AVAILABLE:
-            from templates_main import INDEX_TEMPLATE
-            template = INDEX_TEMPLATE
-        else:
-            template = FALLBACK_INDEX_TEMPLATE
-        
-        return render_template_string(
-            template,
-            system_status=system_status,
-            stats=stats,
-            current_time=datetime.datetime.now()
-        )
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        logger.error("Invalid signature")
+        abort(400)
     except Exception as e:
-        logger.error(f"首頁錯誤: {e}")
-        return render_template_string(
-            FALLBACK_INDEX_TEMPLATE,
-            system_status={'database': 'error', 'templates': False, 'linebot': False, 'ai': False},
-            stats={'total_students': 0, 'total_messages': 0, 'avg_engagement': 0},
-            current_time=datetime.datetime.now()
-        ), 500
+        logger.error(f"處理 webhook 時發生錯誤: {e}")
+        abort(500)
+    
+    return 'OK'
 
-@app.route('/students')
-def students():
-    """學生列表"""
-    try:
-        students_data = get_safe_students()
-        
-        if WEB_TEMPLATES_AVAILABLE:
-            from templates_main import STUDENTS_TEMPLATE
-            template = STUDENTS_TEMPLATE
-        else:
-            template = FALLBACK_STUDENTS_TEMPLATE
-        
-        return render_template_string(template, students=students_data)
-    except Exception as e:
-        logger.error(f"學生列表錯誤: {e}")
-        return render_template_string(
-            FALLBACK_STUDENTS_TEMPLATE,
-            students=[]
-        )
+if handler:  # 只有在 handler 存在時才註冊事件處理器
+    @handler.add(MessageEvent, message=TextMessage)
+    def handle_message(event):
+        """處理 LINE 訊息事件"""
+        try:
+            user_id = event.source.user_id
+            message_text = event.message.text
+            
+            logger.info(f"收到訊息: {user_id} - {message_text}")
+            
+            # 取得或建立學生記錄
+            student = get_or_create_student(user_id, event)
+            
+            # 記錄訊息
+            save_message(student, message_text, event)
+            
+            # 同步學生統計
+            sync_student_stats(student)
+            
+            # 處理 AI 回應
+            if message_text.startswith('@AI') or event.source.type == 'user':
+                handle_ai_request(event, student, message_text)
+            
+            # 進行週期性分析
+            if student.message_count % 5 == 0:  # 每5則訊息分析一次
+                perform_periodic_analysis(student)
+                
+        except Exception as e:
+            logger.error(f"處理訊息時發生錯誤: {e}")
+            # 回傳錯誤訊息給用戶
+            try:
+                if line_bot_api:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="抱歉，系統處理時發生錯誤，請稍後再試。")
+                    )
+            except:
+                pass
 
-@app.route('/student/<int:student_id>')
-def student_detail(student_id):
-    """學生詳細頁面"""
+def get_or_create_student(user_id, event):
+    """取得或建立學生記錄"""
     try:
-        if not Student:
-            return "資料庫未初始化", 500
-        
-        student = Student.get_by_id(student_id)
-        messages = list(Message.select().where(
-            Message.student == student
-        ).order_by(Message.timestamp.desc()).limit(10)) if Message else []
-        
-        # 簡化版學生詳情頁面
-        simple_template = '''
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <title>{{ student.name }} - 學習分析</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 40px;
-            background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%);
-            color: #333;
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-        .back-btn {
-            background: #007bff;
-            color: white;
-            padding: 10px 20px;
-            text-decoration: none;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: inline-block;
-        }
-        .student-header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 10px;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-        }
-        .stat-card {
-            background: #e3f2fd;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-        }
-        .stat-value {
-            font-size: 2em;
-            font-weight: bold;
-            color: #1976d2;
-        }
-        .messages-section {
-            margin-top: 30px;
-        }
-        .message-item {
-            background: #f8f9fa;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 8px;
-            border-left: 4px solid #007bff;
-        }
-        .message-meta {
-            font-size: 0.9em;
-            color: #666;
-            margin-bottom: 5px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <a href="/students" class="back-btn">← 返回學生列表</a>
-        
-        <div class="student-header">
-            <h1>{{ student.name }}</h1>
-            {% if student.name.startswith('[DEMO]') %}
-            <p style="color: #28a745; font-weight: bold;">演示學生資料</p>
-            {% endif %}
-        </div>
-        
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value">{{ "%.1f"|format(student.participation_rate) }}%</div>
-                <div>參與度</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{{ student.message_count }}</div>
-                <div>總訊息數</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{{ student.question_count }}</div>
-                <div>問題數</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{{ "%.1f"|format(student.question_rate) }}%</div>
-                <div>提問率</div>
-            </div>
-        </div>
-        
-        <div class="messages-section">
-            <h3>📝 最近訊息</h3>
-            {% for message in messages %}
-            <div class="message-item">
-                <div class="message-meta">
-                    {{ message.timestamp.strftime('%Y-%m-%d %H:%M') }} - {{ message.message_type }}
-                </div>
-                <div>{{ message.content[:100] }}{% if message.content|length > 100 %}...{% endif %}</div>
-            </div>
-            {% else %}
-            <div style="text-align: center; color: #666; padding: 40px;">
-                暫無訊息記錄
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-</body>
-</html>
-        '''
-        
-        return render_template_string(simple_template, student=student, messages=messages)
-        
+        student = Student.get(Student.line_user_id == user_id)
+        # 更新最後活動時間
+        student.last_active = datetime.datetime.now()
+        student.save()
+        return student
     except Student.DoesNotExist:
-        return "學生未找到", 404
+        # 嘗試取得用戶資料
+        try:
+            if line_bot_api:
+                profile = line_bot_api.get_profile(user_id)
+                display_name = profile.display_name
+            else:
+                display_name = f"User_{user_id[:8]}"
+        except:
+            display_name = f"User_{user_id[:8]}"
+        
+        # 建立新學生記錄
+        student = Student.create(
+            name=display_name,
+            line_user_id=user_id,
+            created_at=datetime.datetime.now(),
+            last_active=datetime.datetime.now(),
+            message_count=0,
+            question_count=0,
+            participation_rate=0.0,
+            question_rate=0.0
+        )
+        
+        logger.info(f"建立新學生記錄: {display_name} ({user_id})")
+        return student
+
+def save_message(student, message_text, event):
+    """儲存訊息記錄"""
+    # 判斷訊息類型
+    is_question = is_question_message(message_text)
+    
+    # 儲存訊息
+    message = Message.create(
+        student=student,
+        content=message_text,
+        message_type='question' if is_question else 'statement',
+        timestamp=datetime.datetime.now(),
+        source_type=getattr(event.source, 'type', 'unknown'),
+        group_id=getattr(event.source, 'group_id', None),
+        room_id=getattr(event.source, 'room_id', None)
+    )
+    
+    logger.info(f"訊息已儲存: {student.name} - {message_text[:50]}...")
+    return message
+
+def is_question_message(text):
+    """判斷是否為問題"""
+    question_indicators = [
+        '?', '？', '嗎', '呢', '如何', '怎麼', '為什麼', '什麼是',
+        'how', 'what', 'why', 'when', 'where', 'which', 'who',
+        'can you', 'could you', 'would you', 'is it', 'are you',
+        'do you', 'does', 'did', 'will', 'shall'
+    ]
+    
+    text_lower = text.lower()
+    return any(indicator in text_lower for indicator in question_indicators)
+
+def handle_ai_request(event, student, message_text):
+    """處理 AI 請求"""
+    try:
+        # 移除 @AI 前綴（如果有的話）
+        query = message_text.replace('@AI', '').strip()
+        if not query:
+            query = message_text
+        
+        # 取得 AI 回應
+        ai_response = get_ai_response(query, student.id)
+        
+        if ai_response and line_bot_api:
+            # 儲存 AI 回應記錄
+            AIResponse.create(
+                student=student,
+                query=query,
+                response=ai_response,
+                timestamp=datetime.datetime.now(),
+                response_type='gemini'
+            )
+            
+            # 回傳給用戶
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=ai_response)
+            )
+            
+            logger.info(f"AI 回應已發送給 {student.name}")
+        else:
+            if line_bot_api:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="抱歉，我現在無法回應您的問題，請稍後再試。")
+                )
+            
     except Exception as e:
-        logger.error(f"學生詳細頁面錯誤: {e}")
-        return f"載入學生資料時發生錯誤: {str(e)}", 500
+        logger.error(f"處理 AI 請求時發生錯誤: {e}")
+        try:
+            if line_bot_api:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="系統處理中發生問題，請稍後再試。")
+                )
+        except:
+            pass
+
+def perform_periodic_analysis(student):
+    """執行週期性分析"""
+    try:
+        analysis_result = analyze_student_patterns(student.id)
+        if analysis_result:
+            # 儲存分析結果
+            Analysis.create(
+                student=student,
+                analysis_type='pattern_analysis',
+                content=analysis_result,
+                created_at=datetime.datetime.now()
+            )
+            
+            logger.info(f"完成學生分析: {student.name}")
+            
+    except Exception as e:
+        logger.error(f"執行分析時發生錯誤: {e}")
+
+# =================== Web 管理後台功能 ===================
+
+if WEB_TEMPLATES_AVAILABLE:
+    @app.route('/')
+    def index():
+        """Web 管理後台首頁"""
+        stats = get_database_stats()
+        recent_messages = get_recent_messages()
+        
+        return render_template_string(INDEX_TEMPLATE, 
+                                      stats=stats,
+                                      recent_messages=recent_messages,
+                                      current_time=datetime.datetime.now())
+
+    @app.route('/students')
+    def students():
+        """學生列表頁面"""
+        students_data = get_database_students()
+        
+        return render_template_string(STUDENTS_TEMPLATE,
+                                      students=students_data,
+                                      current_time=datetime.datetime.now())
+
+    @app.route('/student/<int:student_id>')
+    def student_detail(student_id):
+        """學生詳細頁面 - 完全整合版本"""
+        try:
+            student_record = Student.get_by_id(student_id)
+            
+            # 同步學生統計
+            stats = sync_student_stats(student_record)
+            if not stats:
+                stats = {
+                    'total_messages': 0,
+                    'question_count': 0,
+                    'participation_rate': 0,
+                    'question_rate': 0,
+                    'active_days': 0,
+                    'last_active': datetime.datetime.now()
+                }
+            
+            # 獲取學生訊息（最新20則）
+            all_messages = list(Message.select().where(
+                Message.student == student_record
+            ).order_by(Message.timestamp.desc()))
+            
+            display_messages = []
+            for msg in all_messages[:20]:
+                # 計算相對時間
+                time_diff = datetime.datetime.now() - msg.timestamp
+                if time_diff.days > 0:
+                    time_display = f"{time_diff.days} 天前"
+                elif time_diff.seconds > 3600:
+                    hours = time_diff.seconds // 3600
+                    time_display = f"{hours} 小時前"
+                elif time_diff.seconds > 60:
+                    minutes = time_diff.seconds // 60
+                    time_display = f"{minutes} 分鐘前"
+                else:
+                    time_display = "剛剛"
+                
+                display_messages.append({
+                    'content': msg.content,
+                    'timestamp': msg.timestamp,
+                    'time_display': time_display,
+                    'message_type': msg.message_type
+                })
+            
+            # 學習分析
+            try:
+                analysis = analyze_student_patterns(student_id)
+            except Exception as e:
+                logger.warning(f"AI 分析失敗: {e}")
+                analysis = None
+            
+            # 對話摘要
+            try:
+                from utils import get_student_conversation_summary
+                conversation_summary = get_student_conversation_summary(student_id, days=30)
+            except Exception as e:
+                logger.warning(f"對話摘要生成失敗: {e}")
+                conversation_summary = None
+            
+            # 準備學生資料
+            student_data = {
+                'id': student_record.id,
+                'name': student_record.name,
+                'line_user_id': student_record.line_user_id or 'N/A',
+                'total_messages': stats['total_messages'],
+                'question_count': stats['question_count'],
+                'participation_rate': round(stats['participation_rate'], 1),
+                'question_rate': round(stats['question_rate'], 1),
+                'active_days': stats['active_days'],
+                'last_active': stats['last_active'].strftime('%Y-%m-%d %H:%M'),
+                'last_active_relative': calculate_relative_time(stats['last_active']),
+                'created_at': student_record.created_at.strftime('%Y-%m-%d') if student_record.created_at else 'N/A'
+            }
+            
+            return render_template_string(STUDENT_DETAIL_TEMPLATE,
+                                        student=student_data,
+                                        messages=display_messages,
+                                        analysis=analysis,
+                                        conversation_summary=conversation_summary,
+                                        current_time=datetime.datetime.now())
+                                        
+        except Student.DoesNotExist:
+            return "學生未找到", 404
+        except Exception as e:
+            logger.error(f"獲取學生詳細資料時發生錯誤: {e}")
+            return "系統錯誤", 500
+
+    @app.route('/teaching-insights')
+    def teaching_insights():
+        """教師分析後台"""
+        from utils import get_question_category_stats
+        
+        category_stats = get_question_category_stats()
+        engagement_analysis = {
+            'daily_average': 78.5,
+            'weekly_trend': 5.2,
+            'peak_hours': ['10:00-11:00', '14:00-15:00', '19:00-20:00']
+        }
+        students = get_database_students()
+        stats = get_database_stats()
+        
+        return render_template_string(TEACHING_INSIGHTS_TEMPLATE, 
+                                      category_stats=category_stats,
+                                      engagement_analysis=engagement_analysis,
+                                      students=students,
+                                      stats=stats)
+
+    @app.route('/conversation-summaries')
+    def conversation_summaries():
+        """對話摘要頁面"""
+        summaries = []  # 使用示範資料
+        insights = {
+            'total_conversations': Message.select().count(),
+            'avg_length': 8.5,
+            'satisfaction_rate': 92,
+            'response_time': 2.3
+        }
+        
+        return render_template_string(CONVERSATION_SUMMARIES_TEMPLATE,
+                                      summaries=summaries,
+                                      insights=insights)
+
+    @app.route('/learning-recommendations')
+    def learning_recommendations():
+        """學習建議頁面"""
+        recommendations = []  # 使用示範資料
+        overview = {
+            'total_recommendations': 24,
+            'high_priority': 8,
+            'in_progress': 12,
+            'completed_this_week': 15
+        }
+        
+        return render_template_string(LEARNING_RECOMMENDATIONS_TEMPLATE,
+                                      recommendations=recommendations,
+                                      overview=overview)
+
+    @app.route('/storage-management')
+    def storage_management():
+        """儲存管理頁面"""
+        storage_stats = {
+            'used_gb': 2.5,
+            'available_gb': 7.5,
+            'total_gb': 10.0,
+            'usage_percentage': 25,
+            'daily_growth_mb': 15,
+            'days_until_full': 180
+        }
+        
+        data_breakdown = {
+            'conversations': {'size': '1.2GB', 'percentage': 48},
+            'analysis': {'size': '0.8GB', 'percentage': 32},
+            'cache': {'size': '0.3GB', 'percentage': 12},
+            'exports': {'size': '0.15GB', 'percentage': 6},
+            'logs': {'size': '0.05GB', 'percentage': 2}
+        }
+        
+        return render_template_string(STORAGE_MANAGEMENT_TEMPLATE,
+                                      storage_stats=storage_stats,
+                                      data_breakdown=data_breakdown,
+                                      cleanup_estimates={'safe': 150, 'aggressive': 500},
+                                      alerts=[],
+                                      recommendations={'cache_cleanup': 150})
+
+    @app.route('/data-export')
+    def data_export():
+        """資料匯出頁面"""
+        default_dates = {
+            'today': datetime.datetime.now().strftime('%Y-%m-%d'),
+            'month_ago': (datetime.datetime.now() - datetime.timedelta(days=30)).strftime('%Y-%m-%d'),
+            'semester_start': (datetime.datetime.now() - datetime.timedelta(days=90)).strftime('%Y-%m-%d')
+        }
+        
+        return render_template_string(DATA_EXPORT_TEMPLATE,
+                                      default_dates=default_dates,
+                                      export_jobs=[],
+                                      export_history=[])
+
+def calculate_relative_time(timestamp):
+    """計算相對時間"""
+    if not timestamp:
+        return "未知"
+        
+    try:
+        time_diff = datetime.datetime.now() - timestamp
+        
+        if time_diff.days > 0:
+            return f"{time_diff.days} 天前"
+        elif time_diff.seconds > 3600:
+            hours = time_diff.seconds // 3600
+            return f"{hours} 小時前"
+        elif time_diff.seconds > 60:
+            minutes = time_diff.seconds // 60
+            return f"{minutes} 分鐘前"
+        else:
+            return "剛剛"
+    except Exception:
+        return "未知"
+
+# =================== API 路由 ===================
 
 @app.route('/health')
 def health_check():
-    """健康檢查"""
+    """健康檢查端點"""
     try:
-        system_status = get_system_status()
-        stats = get_safe_stats()
-        
-        return jsonify({
+        return {
             'status': 'healthy',
             'timestamp': datetime.datetime.now().isoformat(),
-            'system_status': system_status,
-            'stats': stats,
-            'environment': {
-                'DATABASE_URL': 'configured' if os.getenv('DATABASE_URL') else 'not_configured',
-                'GEMINI_API_KEY': 'configured' if os.getenv('GEMINI_API_KEY') else 'not_configured',
-                'LINE_ACCESS_TOKEN': 'configured' if os.getenv('CHANNEL_ACCESS_TOKEN') else 'not_configured'
-            }
-        })
+            'database': 'connected' if not db.is_closed() else 'disconnected',
+            'line_bot': 'configured' if line_bot_api else 'not_configured',
+            'gemini_ai': 'configured' if GEMINI_API_KEY else 'not_configured',
+            'web_interface': 'available' if WEB_TEMPLATES_AVAILABLE else 'not_available'
+        }
     except Exception as e:
-        logger.error(f"健康檢查錯誤: {e}")
-        return jsonify({
+        return {
             'status': 'error',
             'error': str(e),
             'timestamp': datetime.datetime.now().isoformat()
-        }), 500
+        }, 500
 
 @app.route('/stats')
-def get_stats_page():
-    """統計資料頁面"""
-    try:
-        stats = get_safe_stats()
-        system_status = get_system_status()
-        
-        stats_template = '''
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <title>系統統計 - EMI 智能教學助理</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 40px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-        .back-btn {
-            background: #007bff;
-            color: white;
-            padding: 10px 20px;
-            text-decoration: none;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: inline-block;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-        }
-        .stat-card {
-            background: #e3f2fd;
-            padding: 25px;
-            border-radius: 10px;
-            text-align: center;
-        }
-        .stat-value {
-            font-size: 2.5em;
-            font-weight: bold;
-            color: #1976d2;
-            margin-bottom: 10px;
-        }
-        .system-info {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 10px;
-            margin: 20px 0;
-        }
-        .info-item {
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            padding: 10px;
-            background: white;
-            border-radius: 5px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <a href="/" class="back-btn">← 返回首頁</a>
-        <h1>📊 系統統計</h1>
-        
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value">{{ stats.total_students }}</div>
-                <div>總學生數</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{{ stats.total_messages }}</div>
-                <div>總訊息數</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{{ stats.avg_engagement }}%</div>
-                <div>平均參與度</div>
-            </div>
-        </div>
-        
-        <div class="system-info">
-            <h3>🔧 系統狀態</h3>
-            <div class="info-item">
-                <span>資料庫：</span>
-                <span style="color: {{ '#28a745' if system_status.database == 'connected' else '#dc3545' }}">
-                    {{ system_status.database }}
-                </span>
-            </div>
-            <div class="info-item">
-                <span>模板系統：</span>
-                <span style="color: {{ '#28a745' if system_status.templates else '#ffc107' }}">
-                    {{ '正常' if system_status.templates else '簡化模式' }}
-                </span>
-            </div>
-            <div class="info-item">
-                <span>LINE Bot：</span>
-                <span style="color: {{ '#28a745' if system_status.linebot else '#6c757d' }}">
-                    {{ '已配置' if system_status.linebot else '未配置' }}
-                </span>
-            </div>
-            <div class="info-item">
-                <span>AI 服務：</span>
-                <span style="color: {{ '#28a745' if system_status.ai else '#6c757d' }}">
-                    {{ '已配置' if system_status.ai else '未配置' }}
-                </span>
-            </div>
-            <div class="info-item">
-                <span>更新時間：</span>
-                <span>{{ current_time.strftime('%Y-%m-%d %H:%M:%S') }}</span>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-        '''
-        
-        return render_template_string(
-            stats_template,
-            stats=stats,
-            system_status=system_status,
-            current_time=datetime.datetime.now()
-        )
-    except Exception as e:
-        logger.error(f"統計頁面錯誤: {e}")
-        return f"載入統計資料時發生錯誤: {str(e)}", 500
+def get_stats():
+    """取得系統統計資料"""
+    return jsonify(get_database_stats())
+
+@app.route('/api/dashboard-stats')
+def api_dashboard_stats():
+    """API: 獲取儀表板統計"""
+    return jsonify({
+        'success': True,
+        'data': get_database_stats()
+    })
+
+@app.route('/api/students')
+def api_students():
+    """API: 獲取學生列表"""
+    return jsonify({
+        'success': True,
+        'students': get_database_students()
+    })
 
 @app.route('/api/sync-all-students')
 def sync_all_students():
-    """同步所有學生統計"""
+    """API: 同步所有學生統計"""
     try:
-        if not Student:
-            return jsonify({
-                'success': False,
-                'error': '資料庫未初始化'
-            }), 500
-        
         students = list(Student.select())
         updated_count = 0
         
         for student in students:
-            try:
-                # 簡化的統計更新
-                if Message:
-                    messages = list(Message.select().where(Message.student == student))
-                    student.message_count = len(messages)
-                    student.question_count = len([m for m in messages if m.message_type == 'question'])
-                    student.question_rate = (student.question_count / max(student.message_count, 1)) * 100
-                    student.last_active = datetime.datetime.now()
-                    student.save()
-                    updated_count += 1
-            except Exception as e:
-                logger.error(f"更新學生 {student.name} 統計錯誤: {e}")
-                continue
+            stats = sync_student_stats(student)
+            if stats:
+                updated_count += 1
         
         return jsonify({
             'success': True,
@@ -796,209 +737,176 @@ def sync_all_students():
             'message': f'成功同步 {updated_count} 位學生的統計資料'
         })
     except Exception as e:
-        logger.error(f"同步學生統計錯誤: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
 
-# LINE Bot 回調（如果可用）
-@app.route("/callback", methods=['POST'])
-def callback():
-    """LINE Bot Webhook"""
-    if not handler:
-        return jsonify({'error': 'LINE Bot 未配置'}), 503
-    
-    signature = request.headers.get('X-Line-Signature', '')
-    body = request.get_data(as_text=True)
-    
-    try:
-        handler.handle(body, signature)
-        return 'OK'
-    except Exception as e:
-        logger.error(f"LINE Bot 回調錯誤: {e}")
-        abort(400)
+# =================== 錯誤處理 ===================
 
-# 錯誤處理
 @app.errorhandler(404)
 def not_found_error(error):
     """404 錯誤處理"""
     if request.path.startswith('/api/'):
-        return jsonify({'error': 'Not found'}), 404
+        return {'error': 'Not found'}, 404
     
-    error_template = '''
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <title>頁面未找到 - EMI 智能教學助理</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            text-align: center;
-            padding: 100px 20px;
-            margin: 0;
-            min-height: 100vh;
-        }
-        .error-container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 40px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-        }
-        h1 { font-size: 4em; margin-bottom: 20px; }
-        p { font-size: 1.2em; margin-bottom: 30px; }
-        a {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 15px 30px;
-            text-decoration: none;
-            border-radius: 25px;
-            transition: all 0.3s ease;
-        }
-        a:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
-        }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <h1>404</h1>
-        <p>抱歉，您請求的頁面不存在</p>
-        <a href="/">返回首頁</a>
-    </div>
-</body>
-</html>
-    '''
-    return render_template_string(error_template), 404
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <title>頁面未找到 - EMI 智能教學助理</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                text-align: center;
+                padding: 100px 20px;
+                margin: 0;
+            }
+            .error-container {
+                max-width: 600px;
+                margin: 0 auto;
+                background: rgba(255, 255, 255, 0.1);
+                padding: 40px;
+                border-radius: 15px;
+                backdrop-filter: blur(10px);
+            }
+            h1 { font-size: 3em; margin-bottom: 20px; }
+            p { font-size: 1.2em; margin-bottom: 30px; }
+            a {
+                background: rgba(255, 255, 255, 0.2);
+                color: white;
+                padding: 15px 30px;
+                text-decoration: none;
+                border-radius: 25px;
+                transition: all 0.3s ease;
+            }
+            a:hover {
+                background: rgba(255, 255, 255, 0.3);
+                transform: translateY(-2px);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="error-container">
+            <h1>404</h1>
+            <p>抱歉，您請求的頁面不存在</p>
+            <a href="/">返回首頁</a>
+        </div>
+    </body>
+    </html>
+    """), 404
 
 @app.errorhandler(500)
 def internal_error(error):
     """500 錯誤處理"""
     logger.error(f"Internal server error: {error}")
-    
     if request.path.startswith('/api/'):
-        return jsonify({'error': 'Internal server error'}), 500
+        return {'error': 'Internal server error'}, 500
     
-    error_template = '''
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <title>系統錯誤 - EMI 智能教學助理</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-            color: white;
-            text-align: center;
-            padding: 100px 20px;
-            margin: 0;
-            min-height: 100vh;
-        }
-        .error-container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 40px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-        }
-        h1 { font-size: 4em; margin-bottom: 20px; }
-        p { font-size: 1.2em; margin-bottom: 30px; }
-        a {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 15px 30px;
-            text-decoration: none;
-            border-radius: 25px;
-            transition: all 0.3s ease;
-        }
-        a:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
-        }
-        .error-details {
-            background: rgba(0, 0, 0, 0.2);
-            padding: 20px;
-            border-radius: 10px;
-            margin: 20px 0;
-            text-align: left;
-        }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <h1>500</h1>
-        <p>系統發生內部錯誤</p>
-        <div class="error-details">
-            <strong>可能的原因：</strong><br>
-            • 資料庫連線問題<br>
-            • 模板載入失敗<br>
-            • 環境變數配置錯誤<br>
-            • 依賴模組缺失
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <title>系統錯誤 - EMI 智能教學助理</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+                color: white;
+                text-align: center;
+                padding: 100px 20px;
+                margin: 0;
+            }
+            .error-container {
+                max-width: 600px;
+                margin: 0 auto;
+                background: rgba(255, 255, 255, 0.1);
+                padding: 40px;
+                border-radius: 15px;
+                backdrop-filter: blur(10px);
+            }
+            h1 { font-size: 3em; margin-bottom: 20px; }
+            p { font-size: 1.2em; margin-bottom: 30px; }
+            a {
+                background: rgba(255, 255, 255, 0.2);
+                color: white;
+                padding: 15px 30px;
+                text-decoration: none;
+                border-radius: 25px;
+                transition: all 0.3s ease;
+            }
+            a:hover {
+                background: rgba(255, 255, 255, 0.3);
+                transform: translateY(-2px);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="error-container">
+            <h1>500</h1>
+            <p>系統發生內部錯誤，請稍後再試</p>
+            <a href="/">返回首頁</a>
         </div>
-        <a href="/">返回首頁</a>
-        <a href="/health" style="margin-left: 15px;">檢查系統狀態</a>
-    </div>
-</body>
-</html>
-    '''
-    return render_template_string(error_template), 500
+    </body>
+    </html>
+    """), 500
 
-# 初始化函數
-def initialize_app():
-    """初始化應用程式"""
-    logger.info("🚀 開始初始化 EMI 智能教學助理...")
-    
-    # 嘗試載入各個元件
-    models_ok = safe_import_models()
-    templates_ok = safe_import_templates()
-    linebot_ok = safe_import_linebot()
-    
-    logger.info(f"📊 初始化結果:")
-    logger.info(f"  - 資料庫模型: {'✅' if models_ok else '❌'}")
-    logger.info(f"  - 模板系統: {'✅' if templates_ok else '❌'}")
-    logger.info(f"  - LINE Bot: {'✅' if linebot_ok else '❌'}")
-    logger.info(f"  - AI 服務: {'✅' if os.getenv('GEMINI_API_KEY') else '❌'}")
-    
-    # 創建範例資料（如果資料庫可用且為空）
-    if models_ok:
-        try:
-            if Student.select().count() == 0:
-                logger.info("🎯 創建範例資料...")
-                from utils import create_sample_data
-                create_sample_data()
-                logger.info("✅ 範例資料創建完成")
-        except Exception as e:
-            logger.warning(f"⚠️ 範例資料創建失敗: {e}")
-    
-    return {
-        'models': models_ok,
-        'templates': templates_ok,
-        'linebot': linebot_ok,
-        'ai': bool(os.getenv('GEMINI_API_KEY'))
-    }
+# =================== 初始化和啟動 ===================
 
-# 應用程式啟動
+def initialize_sample_data():
+    """初始化範例資料"""
+    try:
+        # 檢查是否已有資料
+        if Student.select().count() == 0:
+            logger.info("建立範例資料...")
+            create_sample_data()
+            logger.info("範例資料建立完成")
+        
+        # 同步所有學生統計
+        students = list(Student.select())
+        for student in students:
+            sync_student_stats(student)
+            
+    except Exception as e:
+        logger.error(f"建立範例資料時發生錯誤: {e}")
+
+# 在應用程式啟動時初始化資料
+with app.app_context():
+    try:
+        initialize_sample_data()
+    except Exception as e:
+        logger.error(f"應用程式初始化錯誤: {e}")
+
+# 程式進入點
 if __name__ == "__main__":
-    # 初始化應用程式
-    init_result = initialize_app()
-    
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_ENV") == "development"
     
-    logger.info(f"🌐 啟動 Web 服務器...")
-    logger.info(f"📍 URL: http://localhost:{port}")
-    logger.info(f"🔧 模式: {'開發' if debug else '生產'}")
+    logger.info(f"🚀 啟動 EMI 智能教學助理")
+    logger.info(f"📱 LINE Bot: {'已配置' if line_bot_api else '未配置'}")
+    logger.info(f"🌐 Web 管理後台: {'可用' if WEB_TEMPLATES_AVAILABLE else '不可用'}")
+    logger.info(f"🤖 Gemini AI: {'已配置' if GEMINI_API_KEY else '未配置'}")
+    logger.info(f"🔗 Port: {port}, Debug: {debug}")
     
-    if not any(init_result.values()):
-        logger.warning("⚠️ 系統在最小化模式下運行")
+    if WEB_TEMPLATES_AVAILABLE:
+        logger.info("📊 Web 管理後台路由:")
+        logger.info("   - 首頁: http://localhost:5000/")
+        logger.info("   - 學生管理: http://localhost:5000/students")
+        logger.info("   - 教師分析: http://localhost:5000/teaching-insights")
+        logger.info("   - 對話摘要: http://localhost:5000/conversation-summaries")
+        logger.info("   - 學習建議: http://localhost:5000/learning-recommendations")
+        logger.info("   - 儲存管理: http://localhost:5000/storage-management")
+        logger.info("   - 資料匯出: http://localhost:5000/data-export")
+    
+    logger.info("🔧 API 端點:")
+    logger.info("   - 健康檢查: http://localhost:5000/health")
+    logger.info("   - 系統統計: http://localhost:5000/stats")
+    logger.info("   - 同步學生: http://localhost:5000/api/sync-all-students")
+    logger.info("   - LINE Bot Webhook: http://localhost:5000/callback")
     
     app.run(
         debug=debug,
@@ -1006,5 +914,5 @@ if __name__ == "__main__":
         port=port
     )
 
-# WSGI 進入點
+# WSGI 應用程式入口點（用於生產環境）
 application = app
