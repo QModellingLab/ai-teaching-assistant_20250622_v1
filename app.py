@@ -127,10 +127,16 @@ def get_database_stats():
         total_students = Student.select().count()
         total_messages = Message.select().count()
         total_questions = Message.select().where(Message.message_type == 'question').count()
+        
+        # 修復：正確區分真實學生和演示學生
+        real_students = Student.select().where(~Student.name.startswith('[DEMO]')).count()
+        demo_students = Student.select().where(Student.name.startswith('[DEMO]')).count()
+        
         active_today = Student.select().where(
             Student.last_active >= datetime.datetime.now().date()
         ).count()
         
+        # 同步所有學生統計
         students = list(Student.select())
         total_participation = 0
         valid_students = 0
@@ -145,8 +151,11 @@ def get_database_stats():
         
         return {
             'total_students': total_students,
+            'real_students': real_students,  # 修復：顯示真實學生數
+            'demo_students': demo_students,
             'active_conversations': active_today,
             'total_messages': total_messages,
+            'total_questions': total_questions,
             'avg_engagement': round(avg_engagement, 1),
             'active_students': active_today,
             'avg_response_time': '2.3',
@@ -156,8 +165,11 @@ def get_database_stats():
         logger.error(f"獲取資料庫統計時發生錯誤: {e}")
         return {
             'total_students': 0,
+            'real_students': 0,
+            'demo_students': 0,
             'active_conversations': 0,
             'total_messages': 0,
+            'total_questions': 0,
             'avg_engagement': 0,
             'active_students': 0,
             'avg_response_time': '0',
@@ -367,6 +379,10 @@ if WEB_TEMPLATES_AVAILABLE:
         """Web 管理後台首頁"""
         stats = get_database_stats()
         recent_messages = get_recent_messages()
+        
+        # 確保所有必要的統計資料都存在
+        if 'real_students' not in stats:
+            stats['real_students'] = stats.get('total_students', 0)
         
         return render_template_string(INDEX_TEMPLATE, 
                                       stats=stats,
