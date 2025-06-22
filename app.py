@@ -172,7 +172,7 @@ def get_database_stats():
 
 def get_database_students():
     """從資料庫獲取學生資料並同步統計"""
-    try:
+    """try:
         students_data = []
         for student in Student.select().order_by(Student.last_active.desc()):
             # 同步統計資料
@@ -242,7 +242,7 @@ def get_database_students():
         
         return students_data
     except Exception as e:
-        logger.error(f"獲取學生資料時發生錯誤: {e}")
+        logger.error(f"獲取學生資料時發生錯誤: {e}")"""
         return []
 
 def get_recent_messages():
