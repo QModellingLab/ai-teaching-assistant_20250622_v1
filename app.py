@@ -1,4 +1,4 @@
-# app.py - EMI 智能教學助理 (LINE Bot + Web 管理後台)
+# app.py - EMI 智能教學助理 (修正版本)
 
 import os
 import json
@@ -73,6 +73,194 @@ try:
 except Exception as e:
     logger.error(f"資料庫初始化失敗: {e}")
 
+# =================== 輔助函數 ===================
+
+def sync_student_stats(student):
+    """同步學生統計資料"""
+    try:
+        # 取得所有該學生的訊息
+        all_messages = list(Message.select().where(Message.student == student))
+        
+        # 計算實際統計
+        total_messages = len(all_messages)
+        questions = [m for m in all_messages if m.message_type == 'question']
+        question_count = len(questions)
+        
+        # 計算活躍天數
+        if all_messages:
+            message_dates = set(m.timestamp.date() for m in all_messages)
+            active_days = len(message_dates)
+            last_active = max(all_messages, key=lambda x: x.timestamp).timestamp
+        else:
+            active_days = 0
+            last_active = student.created_at or datetime.datetime.now()
+        
+        # 計算參與度和提問率
+        participation_rate = min(100, total_messages * 10) if total_messages else 0
+        question_rate = (question_count / max(total_messages, 1)) * 100
+        
+        # 更新學生記錄（如果有變化）
+        if (student.message_count != total_messages or 
+            student.question_count != question_count or
+            abs(student.participation_rate - participation_rate) > 1):
+            
+            student.message_count = total_messages
+            student.question_count = question_count
+            student.question_rate = question_rate
+            student.participation_rate = participation_rate
+            student.last_active = last_active
+            student.save()
+            
+            logger.info(f"✅ 同步學生統計: {student.name}")
+        
+        return {
+            'total_messages': total_messages,
+            'question_count': question_count,
+            'participation_rate': participation_rate,
+            'question_rate': question_rate,
+            'active_days': active_days,
+            'last_active': last_active
+        }
+        
+    except Exception as e:
+        logger.error(f"同步學生統計錯誤: {e}")
+        return None
+
+def get_database_stats():
+    """從資料庫獲取真實統計資料"""
+    try:
+        total_students = Student.select().count()
+        total_messages = Message.select().count()
+        total_questions = Message.select().where(Message.message_type == 'question').count()
+        active_today = Student.select().where(
+            Student.last_active >= datetime.datetime.now().date()
+        ).count()
+        
+        # 同步所有學生統計
+        students = list(Student.select())
+        total_participation = 0
+        valid_students = 0
+        
+        for student in students:
+            stats = sync_student_stats(student)
+            if stats:
+                total_participation += stats['participation_rate']
+                valid_students += 1
+        
+        avg_engagement = total_participation / max(valid_students, 1)
+        
+        return {
+            'total_students': total_students,
+            'active_conversations': active_today,
+            'total_messages': total_messages,
+            'avg_engagement': round(avg_engagement, 1),
+            'active_students': active_today,
+            'avg_response_time': '2.3',
+            'system_load': '正常'
+        }
+    except Exception as e:
+        logger.error(f"獲取資料庫統計時發生錯誤: {e}")
+        return {
+            'total_students': 0,
+            'active_conversations': 0,
+            'total_messages': 0,
+            'avg_engagement': 0,
+            'active_students': 0,
+            'avg_response_time': '0',
+            'system_load': '錯誤'
+        }
+
+def get_database_students():
+    """從資料庫獲取學生資料並同步統計"""
+    try:
+        students_data = []
+        for student in Student.select().order_by(Student.last_active.desc()):
+            # 同步統計資料
+            stats = sync_student_stats(student)
+            
+            if stats:
+                # 計算最後活動時間的相對描述
+                time_diff = datetime.datetime.now() - stats['last_active']
+                if time_diff.days > 0:
+                    last_active = f"{time_diff.days} 天前"
+                elif time_diff.seconds > 3600:
+                    hours = time_diff.seconds // 3600
+                    last_active = f"{hours} 小時前"
+                elif time_diff.seconds > 60:
+                    minutes = time_diff.seconds // 60
+                    last_active = f"{minutes} 分鐘前"
+                else:
+                    last_active = "剛剛"
+            else:
+                last_active = "未知"
+                stats = {
+                    'total_messages': 0,
+                    'question_count': 0,
+                    'participation_rate': 0,
+                    'active_days': 0
+                }
+            
+            # 判斷表現等級
+            participation_rate = stats['participation_rate']
+            if participation_rate >= 80:
+                performance_level = 'excellent'
+                performance_text = '優秀'
+            elif participation_rate >= 60:
+                performance_level = 'good'
+                performance_text = '良好'
+            elif participation_rate >= 40:
+                performance_level = 'average'
+                performance_text = '普通'
+            else:
+                performance_level = 'needs-attention'
+                performance_text = '需關注'
+            
+            # 判斷活動狀態
+            if time_diff.days < 1:
+                status = 'active'
+            elif time_diff.days < 7:
+                status = 'moderate'
+            else:
+                status = 'inactive'
+            
+            students_data.append({
+                'id': student.id,
+                'name': student.name,
+                'email': student.line_user_id or 'N/A',
+                'total_messages': stats['total_messages'],
+                'engagement_score': stats['participation_rate'],
+                'last_active': last_active,
+                'status': status,
+                'engagement': int(stats['participation_rate']),
+                'questions_count': stats['question_count'],
+                'progress': int(stats['participation_rate']),
+                'performance_level': performance_level,
+                'performance_text': performance_text,
+                'active_days': stats.get('active_days', 0),
+                'participation_rate': stats['participation_rate']
+            })
+        
+        return students_data
+    except Exception as e:
+        logger.error(f"獲取學生資料時發生錯誤: {e}")
+        return []
+
+def get_recent_messages():
+    """獲取最近訊息"""
+    try:
+        recent = []
+        for message in Message.select().join(Student).order_by(Message.timestamp.desc()).limit(10):
+            recent.append({
+                'student': {'name': message.student.name},
+                'timestamp': message.timestamp,
+                'message_type': message.message_type.title(),
+                'content': message.content
+            })
+        return recent
+    except Exception as e:
+        logger.error(f"獲取最近訊息時發生錯誤: {e}")
+        return []
+
 # =================== LINE Bot 功能 ===================
 
 @app.route("/callback", methods=['POST'])
@@ -114,8 +302,8 @@ if handler:  # 只有在 handler 存在時才註冊事件處理器
             # 記錄訊息
             save_message(student, message_text, event)
             
-            # 更新學生統計
-            update_student_stats(student.id)
+            # 同步學生統計
+            sync_student_stats(student)
             
             # 處理 AI 回應
             if message_text.startswith('@AI') or event.source.type == 'user':
@@ -268,133 +456,6 @@ def perform_periodic_analysis(student):
 
 # =================== Web 管理後台功能 ===================
 
-def get_database_stats():
-    """從資料庫獲取真實統計資料"""
-    try:
-        total_students = Student.select().count()
-        total_messages = Message.select().count()
-        total_questions = Message.select().where(Message.message_type == 'question').count()
-        active_today = Student.select().where(
-            Student.last_active >= datetime.datetime.now().date()
-        ).count()
-        
-        # 計算平均參與度
-        avg_engagement = Student.select().avg(Student.participation_rate) or 0
-        
-        return {
-            'total_students': total_students,
-            'active_conversations': active_today,
-            'total_messages': total_messages,
-            'avg_engagement': round(avg_engagement, 1),
-            'active_students': active_today,
-            'avg_response_time': '2.3',
-            'system_load': '正常'
-        }
-    except Exception as e:
-        logger.error(f"獲取資料庫統計時發生錯誤: {e}")
-        # 返回預設值
-        return {
-            'total_students': 0,
-            'active_conversations': 0,
-            'total_messages': 0,
-            'avg_engagement': 0,
-            'active_students': 0,
-            'avg_response_time': '0',
-            'system_load': '錯誤'
-        }
-
-def get_database_students():
-    """從資料庫獲取學生資料"""
-    try:
-        students = []
-        for student in Student.select().order_by(Student.last_active.desc()):
-            # 計算最後活動時間的相對描述
-            if student.last_active:
-                time_diff = datetime.datetime.now() - student.last_active
-                if time_diff.days > 0:
-                    last_active = f"{time_diff.days} 天前"
-                elif time_diff.seconds > 3600:
-                    hours = time_diff.seconds // 3600
-                    last_active = f"{hours} 小時前"
-                elif time_diff.seconds > 60:
-                    minutes = time_diff.seconds // 60
-                    last_active = f"{minutes} 分鐘前"
-                else:
-                    last_active = "剛剛"
-            else:
-                last_active = "未知"
-            
-            # 判斷表現等級
-            if student.participation_rate >= 80:
-                performance_level = 'excellent'
-                performance_text = '優秀'
-            elif student.participation_rate >= 60:
-                performance_level = 'good'
-                performance_text = '良好'
-            elif student.participation_rate >= 40:
-                performance_level = 'average'
-                performance_text = '普通'
-            else:
-                performance_level = 'needs-attention'
-                performance_text = '需關注'
-            
-            students.append({
-                'id': student.id,
-                'name': student.name,
-                'email': student.line_user_id or 'N/A',
-                'total_messages': student.message_count,
-                'engagement_score': student.participation_rate,
-                'last_active': last_active,
-                'status': 'active' if time_diff.days < 1 else 'moderate',
-                'engagement': int(student.participation_rate),
-                'questions_count': student.question_count,
-                'progress': int(student.participation_rate),
-                'performance_level': performance_level,
-                'performance_text': performance_text
-            })
-        
-        return students
-    except Exception as e:
-        logger.error(f"獲取學生資料時發生錯誤: {e}")
-        return []
-
-def get_recent_messages():
-    """獲取最近訊息"""
-    try:
-        recent = []
-        for message in Message.select().join(Student).order_by(Message.timestamp.desc()).limit(10):
-            recent.append({
-                'student': {'name': message.student.name},
-                'timestamp': message.timestamp,
-                'message_type': message.message_type.title(),
-                'content': message.content
-            })
-        return recent
-    except Exception as e:
-        logger.error(f"獲取最近訊息時發生錯誤: {e}")
-        return []
-
-def get_question_category_stats():
-    """獲取問題分類統計（簡化版）"""
-    try:
-        total_questions = Message.select().where(Message.message_type == 'question').count()
-        # 這裡可以根據實際需求進行更複雜的分類
-        return {
-            'grammar_questions': int(total_questions * 0.4),  # 假設40%是文法問題
-            'vocabulary_questions': int(total_questions * 0.3),  # 30%詞彙
-            'pronunciation_questions': int(total_questions * 0.2),  # 20%發音
-            'cultural_questions': int(total_questions * 0.1)  # 10%文化
-        }
-    except Exception as e:
-        logger.error(f"獲取問題分類統計時發生錯誤: {e}")
-        return {
-            'grammar_questions': 0,
-            'vocabulary_questions': 0,
-            'pronunciation_questions': 0,
-            'cultural_questions': 0
-        }
-
-# Web 路由
 if WEB_TEMPLATES_AVAILABLE:
     @app.route('/')
     def index():
@@ -418,42 +479,86 @@ if WEB_TEMPLATES_AVAILABLE:
 
     @app.route('/student/<int:student_id>')
     def student_detail(student_id):
-        """學生詳細頁面"""
+        """學生詳細頁面 - 完全整合版本"""
         try:
             student_record = Student.get_by_id(student_id)
             
-            # 獲取學生訊息
-            messages = []
-            for msg in Message.select().where(Message.student == student_record).order_by(Message.timestamp.desc()).limit(50):
-                messages.append({
+            # 同步學生統計
+            stats = sync_student_stats(student_record)
+            if not stats:
+                stats = {
+                    'total_messages': 0,
+                    'question_count': 0,
+                    'participation_rate': 0,
+                    'question_rate': 0,
+                    'active_days': 0,
+                    'last_active': datetime.datetime.now()
+                }
+            
+            # 獲取學生訊息（最新20則）
+            all_messages = list(Message.select().where(
+                Message.student == student_record
+            ).order_by(Message.timestamp.desc()))
+            
+            display_messages = []
+            for msg in all_messages[:20]:
+                # 計算相對時間
+                time_diff = datetime.datetime.now() - msg.timestamp
+                if time_diff.days > 0:
+                    time_display = f"{time_diff.days} 天前"
+                elif time_diff.seconds > 3600:
+                    hours = time_diff.seconds // 3600
+                    time_display = f"{hours} 小時前"
+                elif time_diff.seconds > 60:
+                    minutes = time_diff.seconds // 60
+                    time_display = f"{minutes} 分鐘前"
+                else:
+                    time_display = "剛剛"
+                
+                display_messages.append({
                     'content': msg.content,
                     'timestamp': msg.timestamp,
+                    'time_display': time_display,
                     'message_type': msg.message_type
                 })
             
-            # 獲取 AI 回應
-            ai_responses = []
-            for resp in AIResponse.select().where(AIResponse.student == student_record).order_by(AIResponse.timestamp.desc()).limit(20):
-                ai_responses.append({
-                    'query': resp.query,
-                    'response': resp.response,
-                    'timestamp': resp.timestamp
-                })
+            # 學習分析
+            try:
+                analysis = analyze_student_patterns(student_id)
+            except Exception as e:
+                logger.warning(f"AI 分析失敗: {e}")
+                analysis = None
             
+            # 對話摘要
+            try:
+                from utils import get_student_conversation_summary
+                conversation_summary = get_student_conversation_summary(student_id, days=30)
+            except Exception as e:
+                logger.warning(f"對話摘要生成失敗: {e}")
+                conversation_summary = None
+            
+            # 準備學生資料
             student_data = {
                 'id': student_record.id,
                 'name': student_record.name,
-                'email': student_record.line_user_id or 'N/A',
-                'total_messages': student_record.message_count,
-                'engagement_score': student_record.participation_rate,
-                'last_active': student_record.last_active.strftime('%Y-%m-%d %H:%M') if student_record.last_active else 'N/A',
-                'messages': messages,
-                'ai_responses': ai_responses
+                'line_user_id': student_record.line_user_id or 'N/A',
+                'total_messages': stats['total_messages'],
+                'question_count': stats['question_count'],
+                'participation_rate': round(stats['participation_rate'], 1),
+                'question_rate': round(stats['question_rate'], 1),
+                'active_days': stats['active_days'],
+                'last_active': stats['last_active'].strftime('%Y-%m-%d %H:%M'),
+                'last_active_relative': calculate_relative_time(stats['last_active']),
+                'created_at': student_record.created_at.strftime('%Y-%m-%d') if student_record.created_at else 'N/A'
             }
             
             return render_template_string(STUDENT_DETAIL_TEMPLATE,
-                                          student=student_data,
-                                          current_time=datetime.datetime.now())
+                                        student=student_data,
+                                        messages=display_messages,
+                                        analysis=analysis,
+                                        conversation_summary=conversation_summary,
+                                        current_time=datetime.datetime.now())
+                                        
         except Student.DoesNotExist:
             return "學生未找到", 404
         except Exception as e:
@@ -463,6 +568,8 @@ if WEB_TEMPLATES_AVAILABLE:
     @app.route('/teaching-insights')
     def teaching_insights():
         """教師分析後台"""
+        from utils import get_question_category_stats
+        
         category_stats = get_question_category_stats()
         engagement_analysis = {
             'daily_average': 78.5,
@@ -481,7 +588,6 @@ if WEB_TEMPLATES_AVAILABLE:
     @app.route('/conversation-summaries')
     def conversation_summaries():
         """對話摘要頁面"""
-        # 這裡可以根據實際需求生成摘要
         summaries = []  # 使用示範資料
         insights = {
             'total_conversations': Message.select().count(),
@@ -550,6 +656,27 @@ if WEB_TEMPLATES_AVAILABLE:
                                       export_jobs=[],
                                       export_history=[])
 
+def calculate_relative_time(timestamp):
+    """計算相對時間"""
+    if not timestamp:
+        return "未知"
+        
+    try:
+        time_diff = datetime.datetime.now() - timestamp
+        
+        if time_diff.days > 0:
+            return f"{time_diff.days} 天前"
+        elif time_diff.seconds > 3600:
+            hours = time_diff.seconds // 3600
+            return f"{hours} 小時前"
+        elif time_diff.seconds > 60:
+            minutes = time_diff.seconds // 60
+            return f"{minutes} 分鐘前"
+        else:
+            return "剛剛"
+    except Exception:
+        return "未知"
+
 # =================== API 路由 ===================
 
 @app.route('/health')
@@ -574,20 +701,7 @@ def health_check():
 @app.route('/stats')
 def get_stats():
     """取得系統統計資料"""
-    try:
-        stats = {
-            'total_students': Student.select().count(),
-            'total_messages': Message.select().count(),
-            'total_questions': Message.select().where(Message.message_type == 'question').count(),
-            'total_ai_responses': AIResponse.select().count(),
-            'active_today': Student.select().where(
-                Student.last_active >= datetime.datetime.now().date()
-            ).count()
-        }
-        return stats
-    except Exception as e:
-        logger.error(f"取得統計資料時發生錯誤: {e}")
-        return {'error': 'Unable to fetch stats'}, 500
+    return jsonify(get_database_stats())
 
 @app.route('/api/dashboard-stats')
 def api_dashboard_stats():
@@ -597,16 +711,6 @@ def api_dashboard_stats():
         'data': get_database_stats()
     })
 
-@app.route('/api/generate-summaries', methods=['POST'])
-def api_generate_summaries():
-    """API: 生成對話摘要"""
-    options = request.get_json() if request.is_json else {}
-    return jsonify({
-        'success': True,
-        'message': '摘要生成成功',
-        'options': options
-    })
-
 @app.route('/api/students')
 def api_students():
     """API: 獲取學生列表"""
@@ -614,6 +718,29 @@ def api_students():
         'success': True,
         'students': get_database_students()
     })
+
+@app.route('/api/sync-all-students')
+def sync_all_students():
+    """API: 同步所有學生統計"""
+    try:
+        students = list(Student.select())
+        updated_count = 0
+        
+        for student in students:
+            stats = sync_student_stats(student)
+            if stats:
+                updated_count += 1
+        
+        return jsonify({
+            'success': True,
+            'updated_count': updated_count,
+            'message': f'成功同步 {updated_count} 位學生的統計資料'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 # =================== 錯誤處理 ===================
 
@@ -738,6 +865,12 @@ def initialize_sample_data():
             logger.info("建立範例資料...")
             create_sample_data()
             logger.info("範例資料建立完成")
+        
+        # 同步所有學生統計
+        students = list(Student.select())
+        for student in students:
+            sync_student_stats(student)
+            
     except Exception as e:
         logger.error(f"建立範例資料時發生錯誤: {e}")
 
@@ -772,6 +905,7 @@ if __name__ == "__main__":
     logger.info("🔧 API 端點:")
     logger.info("   - 健康檢查: http://localhost:5000/health")
     logger.info("   - 系統統計: http://localhost:5000/stats")
+    logger.info("   - 同步學生: http://localhost:5000/api/sync-all-students")
     logger.info("   - LINE Bot Webhook: http://localhost:5000/callback")
     
     app.run(
