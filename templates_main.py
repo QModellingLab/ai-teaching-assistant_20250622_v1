@@ -1261,35 +1261,53 @@ STUDENT_DETAIL_TEMPLATE = """
 
 # templates_main.py - 第四部分：完成學生詳細模板並添加模板函數
 
-# 完成第三部分的 JavaScript 和 HTML 結束標籤
+# 修正後的程式碼 - 注意字串連接的語法
 STUDENT_DETAIL_TEMPLATE += """
-                .then(data => {
-                    if (data.success) {
-                        // 更新統計數字
-                        const stats = data.stats;
-                        const statNumbers = document.querySelectorAll('.stat-number');
-                        
-                        if (statNumbers.length >= 4) {
-                            statNumbers[0].textContent = stats.message_count;
-                            statNumbers[1].textContent = stats.question_count;
-                            statNumbers[2].textContent = stats.participation_rate + '%';
-                            statNumbers[3].textContent = stats.active_days;
+                    .then(data => {
+                        if (data.success) {
+                            // 更新統計數字
+                            const stats = data.stats;
+                            const statNumbers = document.querySelectorAll('.stat-number');
+                            
+                            if (statNumbers.length >= 4) {
+                                statNumbers[0].textContent = stats.message_count;
+                                statNumbers[1].textContent = stats.question_count;
+                                statNumbers[2].textContent = stats.participation_rate + '%';
+                                statNumbers[3].textContent = stats.active_days;
+                            }
+                            
+                            // 更新圖表或其他內容
+                            updateCharts(stats);
+                            
+                            // 顯示成功訊息
+                            showSuccessMessage('資料更新成功');
+                        } else {
+                            // 顯示錯誤訊息
+                            showErrorMessage('資料載入失敗：' + (data.error || '未知錯誤'));
                         }
-                        
-                        // 更新進度條
-                        const progressBars = document.querySelectorAll('.progress-fill');
-                        if (progressBars.length >= 1) {
-                            progressBars[0].style.width = stats.participation_rate + '%';
-                        }
-                        
-                        console.log('📊 學生統計已更新');
-                    }
-                })
-                .catch(error => {
-                    console.error('統計更新失敗:', error);
-                });
-        }, 60000); // 每分鐘更新一次
-    </script>
+                    })
+                    .catch(error => {
+                        console.error('API 請求錯誤:', error);
+                        showErrorMessage('網路錯誤，請稍後再試');
+                    });
+                
+                function updateCharts(stats) {
+                    // 在這裡更新圖表
+                    console.log('更新圖表資料:', stats);
+                }
+                
+                function showSuccessMessage(message) {
+                    // 顯示成功訊息
+                    console.log('成功:', message);
+                }
+                
+                function showErrorMessage(message) {
+                    // 顯示錯誤訊息
+                    console.error('錯誤:', message);
+                }
+            </script>
+        </div>
+    </div>
 </body>
 </html>
 """
