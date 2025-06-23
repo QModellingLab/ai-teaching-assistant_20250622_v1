@@ -1,7 +1,7 @@
-# templates_main.py - 主要頁面模板
+# templates_main.py - 主要頁面模板 (完整版 - 支援空狀態)
 
 # =========================================
-# 首頁模板
+# 首頁模板 (更新版 - 支援等待狀態)
 # =========================================
 
 INDEX_TEMPLATE = """
@@ -36,6 +36,43 @@ INDEX_TEMPLATE = """
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
+        
+        /* 等待資料狀態樣式 */
+        .waiting-state {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 40px;
+            margin-bottom: 25px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        .waiting-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.7;
+        }
+        .waiting-title {
+            font-size: 1.8em;
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+        .waiting-subtitle {
+            color: #7f8c8d;
+            margin-bottom: 25px;
+            font-size: 1.1em;
+        }
+        .setup-reminder {
+            background: #e8f5e8;
+            border: 2px solid #27ae60;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .setup-reminder h4 {
+            color: #27ae60;
+            margin-bottom: 10px;
+        }
+        
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -49,15 +86,23 @@ INDEX_TEMPLATE = """
             text-align: center;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
+        .stat-card.empty {
+            background: rgba(255, 255, 255, 0.7);
+            border: 2px dashed #bdc3c7;
+        }
         .stat-number {
             font-size: 2.5em;
             font-weight: bold;
             color: #667eea;
         }
+        .stat-number.empty {
+            color: #bdc3c7;
+        }
         .stat-label {
             color: #666;
             margin-top: 5px;
         }
+        
         .navigation {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
@@ -77,17 +122,41 @@ INDEX_TEMPLATE = """
             text-decoration: none;
             text-align: center;
             transition: transform 0.3s ease;
+            position: relative;
         }
         .nav-item:hover {
             transform: translateY(-5px);
             text-decoration: none;
             color: white;
         }
+        .nav-item.disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        .nav-item.disabled:hover {
+            transform: none;
+        }
         .nav-icon {
             font-size: 2em;
             margin-bottom: 10px;
             display: block;
         }
+        .nav-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #e74c3c;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 0.7em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
         .recent-activity {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
@@ -100,6 +169,54 @@ INDEX_TEMPLATE = """
         .activity-item:last-child {
             border-bottom: none;
         }
+        .empty-activity {
+            text-align: center;
+            color: #7f8c8d;
+            padding: 30px;
+            font-style: italic;
+        }
+        
+        .quick-actions {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        .action-btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .action-btn:hover {
+            transform: translateY(-2px);
+            text-decoration: none;
+            color: white;
+        }
+        .action-btn.secondary {
+            background: #34495e;
+        }
+        
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .nav-grid {
+                grid-template-columns: 1fr;
+            }
+            .quick-actions {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
     </style>
 </head>
 <body>
@@ -109,84 +226,207 @@ INDEX_TEMPLATE = """
             <p>生成式AI輔助的雙語教學創新平台</p>
         </div>
 
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-number">{{ stats.total_students or 0 }}</div>
-                <div class="stat-label">總學生數</div>
+        {% if data_status == 'WAITING_FOR_DATA' %}
+        <!-- 等待資料狀態 -->
+        <div class="waiting-state">
+            <div class="waiting-icon">📊</div>
+            <h2 class="waiting-title">系統準備就緒</h2>
+            <p class="waiting-subtitle">{{ waiting_message or '等待學生開始使用 LINE Bot 進行對話' }}</p>
+            
+            <div class="setup-reminder">
+                <h4>🚀 開始收集真實教學資料</h4>
+                <p>請確保已完成以下設定，然後邀請學生使用 LINE Bot：</p>
+                <ul style="text-align: left; margin: 10px 0; padding-left: 20px;">
+                    <li>✅ LINE Bot 已正確設定</li>
+                    <li>📱 分享 Bot 連結給學生</li>
+                    <li>💬 鼓勵學生開始提問</li>
+                    <li>📈 真實分析將自動顯示</li>
+                </ul>
             </div>
-            <div class="stat-card">
-                <div class="stat-number">{{ stats.real_students or 0 }}</div>
+            
+            <div class="quick-actions">
+                <a href="/health" class="action-btn">
+                    🔧 檢查系統狀態
+                </a>
+                <a href="/teaching-insights" class="action-btn secondary">
+                    📊 查看分析後台
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 統計卡片 -->
+        <div class="stats-grid">
+            <div class="stat-card {% if stats.real_students == 0 %}empty{% endif %}">
+                <div class="stat-number {% if stats.real_students == 0 %}empty{% endif %}">{{ stats.real_students or 0 }}</div>
                 <div class="stat-label">真實學生</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-number">{{ stats.total_messages or 0 }}</div>
-                <div class="stat-label">總訊息數</div>
+            <div class="stat-card {% if stats.total_messages == 0 %}empty{% endif %}">
+                <div class="stat-number {% if stats.total_messages == 0 %}empty{% endif %}">{{ stats.total_messages or 0 }}</div>
+                <div class="stat-label">總對話數</div>
+            </div>
+            <div class="stat-card {% if stats.avg_participation == 0 %}empty{% endif %}">
+                <div class="stat-number {% if stats.avg_participation == 0 %}empty{% endif %}">{{ stats.avg_participation or 0 }}%</div>
+                <div class="stat-label">平均參與度</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">{{ stats.avg_participation or 0 }}%</div>
-                <div class="stat-label">平均參與度</div>
+                <div class="stat-number">{{ stats.total_students or 0 }}</div>
+                <div class="stat-label">總註冊數</div>
             </div>
         </div>
 
+        <!-- 功能導航 -->
         <div class="navigation">
             <h3 style="margin-bottom: 20px; color: #2c3e50;">🎯 功能導航</h3>
             <div class="nav-grid">
                 <a href="/teaching-insights" class="nav-item">
                     <span class="nav-icon">📊</span>
                     <strong>教師分析後台</strong>
-                    <div>視覺化問題分類統計</div>
+                    <div>智能問題分析與教學洞察</div>
+                    {% if data_status == 'WAITING_FOR_DATA' %}
+                        <div class="nav-badge">!</div>
+                    {% endif %}
                 </a>
-                <a href="/conversation-summaries" class="nav-item">
+                
+                <a href="/conversation-summaries" class="nav-item {% if data_status == 'WAITING_FOR_DATA' %}disabled{% endif %}">
                     <span class="nav-icon">💬</span>
                     <strong>智能對話摘要</strong>
-                    <div>教學重點提取</div>
+                    <div>AI自動生成教學重點</div>
                 </a>
-                <a href="/learning-recommendations" class="nav-item">
+                
+                <a href="/learning-recommendations" class="nav-item {% if data_status == 'WAITING_FOR_DATA' %}disabled{% endif %}">
                     <span class="nav-icon">🎯</span>
                     <strong>個人化學習建議</strong>
-                    <div>基於分析的學習指導</div>
+                    <div>基於真實資料的學習指導</div>
                 </a>
+                
                 <a href="/storage-management" class="nav-item">
                     <span class="nav-icon">💾</span>
                     <strong>儲存監控</strong>
-                    <div>空間使用量管理</div>
+                    <div>系統資源使用管理</div>
                 </a>
-                <a href="/data-export" class="nav-item">
-                    <span class="nav-icon">📤</span>
-                    <strong>資料匯出</strong>
-                    <div>教學研究資料下載</div>
-                </a>
+                
                 <a href="/students" class="nav-item">
                     <span class="nav-icon">👥</span>
                     <strong>學生管理</strong>
-                    <div>學生列表與詳細分析</div>
+                    <div>學生列表與個別分析</div>
+                </a>
+                
+                <a href="/health" class="nav-item">
+                    <span class="nav-icon">🏥</span>
+                    <strong>系統狀態</strong>
+                    <div>健康檢查與診斷</div>
                 </a>
             </div>
         </div>
 
+        <!-- 最近活動 -->
         <div class="recent-activity">
             <h3 style="margin-bottom: 15px; color: #2c3e50;">📈 最近活動</h3>
-            {% for message in recent_messages %}
-            <div class="activity-item">
-                <strong>{{ message.student.name if message.student else '未知學生' }}</strong>
-                <span style="color: #666;">{{ message.timestamp.strftime('%m-%d %H:%M') }}</span>
-                <div style="color: #888; font-size: 0.9em;">
-                    {{ message.message_type }}: {{ message.content[:50] }}...
+            {% if recent_messages and recent_messages|length > 0 %}
+                {% for message in recent_messages %}
+                <div class="activity-item">
+                    <strong>{{ message.student.name if message.student else '未知學生' }}</strong>
+                    <span style="color: #666;">{{ message.timestamp.strftime('%m-%d %H:%M') if message.timestamp else '未知時間' }}</span>
+                    <div style="color: #888; font-size: 0.9em;">
+                        {{ message.message_type or '訊息' }}: {{ message.content[:50] if message.content else '' }}{% if message.content and message.content|length > 50 %}...{% endif %}
+                    </div>
                 </div>
-            </div>
+                {% endfor %}
             {% else %}
-            <div style="text-align: center; color: #666; padding: 20px;">
-                暫無最近活動
-            </div>
-            {% endfor %}
+                <div class="empty-activity">
+                    {% if data_status == 'WAITING_FOR_DATA' %}
+                        📱 等待學生開始與 LINE Bot 對話...
+                    {% else %}
+                        📝 暫無最近活動記錄
+                    {% endif %}
+                </div>
+            {% endif %}
         </div>
     </div>
+    
+    <script>
+        // 自動檢查真實資料狀態
+        function checkDataStatus() {
+            fetch('/api/real-data-status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.has_real_data && window.location.search.indexOf('waiting') === -1) {
+                        // 如果發現真實資料且當前不在等待模式，重新載入頁面
+                        console.log('發現真實資料，重新載入頁面');
+                        window.location.reload();
+                    } else if (!data.has_real_data) {
+                        // 更新等待狀態的統計
+                        console.log('仍在等待真實學生資料');
+                    }
+                })
+                .catch(error => {
+                    console.log('檢查資料狀態時發生錯誤:', error);
+                });
+        }
+        
+        // 每30秒檢查一次
+        {% if data_status == 'WAITING_FOR_DATA' %}
+        setInterval(checkDataStatus, 30000);
+        {% endif %}
+        
+        // 禁用的連結點擊處理
+        document.querySelectorAll('.nav-item.disabled').forEach(item => {
+            item.addEventListener('click', function(e) {
+                e.preventDefault();
+                alert('📊 此功能需要學生開始使用 LINE Bot 後才能使用。\\n\\n請先：\\n1. 確保 LINE Bot 已設定\\n2. 邀請學生開始對話\\n3. 真實資料將自動分析');
+            });
+        });
+        
+        // 顯示系統狀態通知
+        {% if data_status == 'WAITING_FOR_DATA' %}
+        setTimeout(() => {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: #3498db;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 10px;
+                box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+                max-width: 300px;
+                z-index: 1000;
+                cursor: pointer;
+            `;
+            notification.innerHTML = `
+                <div style="margin-bottom: 8px;"><strong>💡 系統提示</strong></div>
+                <div style="font-size: 0.9em;">系統正在等待學生開始對話。點擊查看詳細設定指南。</div>
+            `;
+            
+            notification.onclick = () => {
+                window.location.href = '/teaching-insights';
+            };
+            
+            document.body.appendChild(notification);
+            
+            // 10秒後自動消失
+            setTimeout(() => {
+                if (document.body.contains(notification)) {
+                    notification.style.opacity = '0';
+                    notification.style.transform = 'translateY(100px)';
+                    setTimeout(() => {
+                        if (document.body.contains(notification)) {
+                            document.body.removeChild(notification);
+                        }
+                    }, 500);
+                }
+            }, 10000);
+        }, 3000);
+        {% endif %}
+    </script>
 </body>
 </html>
 """
 
 # =========================================
-# 學生列表模板
+# 學生列表模板 (保持原樣)
 # =========================================
 
 STUDENTS_TEMPLATE = """
@@ -358,6 +598,101 @@ STUDENTS_TEMPLATE = """
                         <h3>
                             {{ student.name }}
                             {% if student.name.startswith('[DEMO]') %}
+            <div class="demo-warning">
+                <strong>⚠️ 演示資料說明</strong><br>
+                這是系統演示用的虛擬學生資料，用於展示平台功能。真實學生的資料會有更豐富的學習分析內容。
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="analysis-grid">
+            <div class="analysis-card">
+                <div class="card-title">
+                    <span>📊</span>
+                    學習統計
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                    <div style="text-align: center; padding: 15px; background: rgba(251, 194, 235, 0.2); border-radius: 8px;">
+                        <div style="font-size: 1.8em; font-weight: bold; color: #fbc2eb;">{{ student.participation_rate }}%</div>
+                        <div style="color: #666;">參與度</div>
+                    </div>
+                    <div style="text-align: center; padding: 15px; background: rgba(166, 193, 238, 0.2); border-radius: 8px;">
+                        <div style="font-size: 1.8em; font-weight: bold; color: #a6c1ee;">{{ student.question_rate or 0 }}%</div>
+                        <div style="color: #666;">提問率</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="analysis-card">
+                <div class="card-title">
+                    <span>🤖</span>
+                    AI 學習分析
+                </div>
+                <div style="line-height: 1.6;">
+                    {% if analysis %}
+                        {{ analysis }}
+                    {% else %}
+                        <p style="color: #666;">正在分析學生學習模式，請稍後查看詳細分析結果...</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="analysis-card">
+                <div class="card-title">
+                    <span>💬</span>
+                    對話摘要
+                </div>
+                <div style="line-height: 1.6;">
+                    {% if conversation_summary %}
+                        {{ conversation_summary }}
+                    {% else %}
+                        <p style="color: #666;">需要更多對話資料來生成摘要...</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="analysis-card">
+                <div class="card-title">
+                    <span>📝</span>
+                    最近訊息
+                </div>
+                <div class="messages-list">
+                    {% for message in messages %}
+                    <div class="message-item">
+                        <div class="message-meta">
+                            {{ message.timestamp.strftime('%m-%d %H:%M') }} - {{ message.message_type }}
+                        </div>
+                        <div>{{ message.content[:100] }}{% if message.content|length > 100 %}...{% endif %}</div>
+                    </div>
+                    {% else %}
+                    <div style="text-align: center; color: #666; padding: 20px;">
+                        暫無訊息記錄
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+def get_template(template_name):
+    """取得指定模板"""
+    templates = {
+        'index.html': INDEX_TEMPLATE,
+        'students.html': STUDENTS_TEMPLATE,
+        'student_detail.html': STUDENT_DETAIL_TEMPLATE,
+    }
+    return templates.get(template_name, '')
+
+# 匯出所有模板
+__all__ = [
+    'INDEX_TEMPLATE',
+    'STUDENTS_TEMPLATE', 
+    'STUDENT_DETAIL_TEMPLATE',
+    'get_template'
+] %}
                                 <span class="demo-badge">演示</span>
                             {% endif %}
                         </h3>
@@ -403,7 +738,7 @@ STUDENTS_TEMPLATE = """
 """
 
 # =========================================
-# 學生詳細頁面模板
+# 學生詳細頁面模板 (保持原樣)
 # =========================================
 
 STUDENT_DETAIL_TEMPLATE = """
@@ -528,82 +863,4 @@ STUDENT_DETAIL_TEMPLATE = """
                 </div>
             </div>
 
-            {% if student.name.startswith('[DEMO]') %}
-            <div class="demo-warning">
-                <strong>⚠️ 演示資料說明</strong><br>
-                這是系統演示用的虛擬學生資料，用於展示平台功能。真實學生的資料會有更豐富的學習分析內容。
-            </div>
-            {% endif %}
-        </div>
-
-        <div class="analysis-grid">
-            <div class="analysis-card">
-                <div class="card-title">
-                    <span>📊</span>
-                    學習統計
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
-                    <div style="text-align: center; padding: 15px; background: rgba(251, 194, 235, 0.2); border-radius: 8px;">
-                        <div style="font-size: 1.8em; font-weight: bold; color: #fbc2eb;">{{ student.participation_rate }}%</div>
-                        <div style="color: #666;">參與度</div>
-                    </div>
-                    <div style="text-align: center; padding: 15px; background: rgba(166, 193, 238, 0.2); border-radius: 8px;">
-                        <div style="font-size: 1.8em; font-weight: bold; color: #a6c1ee;">{{ student.question_rate or 0 }}%</div>
-                        <div style="color: #666;">提問率</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="analysis-card">
-                <div class="card-title">
-                    <span>🤖</span>
-                    AI 學習分析
-                </div>
-                <div style="line-height: 1.6;">
-                    {% if analysis %}
-                        {{ analysis }}
-                    {% else %}
-                        <p style="color: #666;">正在分析學生學習模式，請稍後查看詳細分析結果...</p>
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="analysis-card">
-                <div class="card-title">
-                    <span>💬</span>
-                    對話摘要
-                </div>
-                <div style="line-height: 1.6;">
-                    {% if conversation_summary %}
-                        {{ conversation_summary }}
-                    {% else %}
-                        <p style="color: #666;">需要更多對話資料來生成摘要...</p>
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="analysis-card">
-                <div class="card-title">
-                    <span>📝</span>
-                    最近訊息
-                </div>
-                <div class="messages-list">
-                    {% for message in messages %}
-                    <div class="message-item">
-                        <div class="message-meta">
-                            {{ message.timestamp.strftime('%m-%d %H:%M') }} - {{ message.message_type }}
-                        </div>
-                        <div>{{ message.content[:100] }}{% if message.content|length > 100 %}...{% endif %}</div>
-                    </div>
-                    {% else %}
-                    <div style="text-align: center; color: #666; padding: 20px;">
-                        暫無訊息記錄
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-"""
+            {% if student.name.startswith('[DEMO]')
