@@ -1261,7 +1261,6 @@ STUDENT_DETAIL_TEMPLATE = """
 
 # templates_main.py - 第四部分：完成學生詳細模板並添加模板函數
 
-# 修正後的程式碼 - 注意字串連接的語法
 STUDENT_DETAIL_TEMPLATE += """
                 .then(data => {
                     if (data.success) {
@@ -1305,13 +1304,11 @@ STUDENT_DETAIL_TEMPLATE += """
                 // 顯示錯誤訊息
                 console.error('錯誤:', message);
             }
-        </script>
-    </div>
-</div>
+        }, 60000); // 每分鐘更新一次
+    </script>
 </body>
 </html>
 """
-
 # =========================================
 # 模板函數和工具
 # =========================================
