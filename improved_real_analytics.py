@@ -1100,3 +1100,22 @@ __all__ = [
     'pure_real_analytics',
     'data_health_checker'
 ]
+
+# Add this at the end of your improved_real_analytics.py file
+
+# Create the missing 'improved_analytics' export that app.py is looking for
+improved_analytics = pure_real_analytics
+
+# Update the __all__ export list
+__all__ = [
+    'has_real_student_data',
+    'get_improved_teaching_insights',
+    'get_improved_conversation_summaries',
+    'get_improved_student_recommendations',
+    'get_improved_storage_management',
+    'check_real_data_health',
+    'get_real_data_readiness',
+    'pure_real_analytics',
+    'data_health_checker',
+    'improved_analytics'  # Add this line
+]
