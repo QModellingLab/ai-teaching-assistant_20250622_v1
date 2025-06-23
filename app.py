@@ -1,11 +1,14 @@
-# app.py - 更新版本（移除資料匯出中心相關內容）
+# app.py - 更新版本（僅移除 data-export 路由，保留所有其他功能）
 
 import os
 import json
 import datetime
 import logging
 import random
-from flask import Flask, request, abort, render_template_string, jsonify, redirect
+import csv
+import zipfile
+from io import StringIO, BytesIO
+from flask import Flask, request, abort, render_template_string, jsonify, redirect, send_file
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError, LineBotApiError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -74,7 +77,7 @@ else:
 # 資料庫初始化
 initialize_db()
 
-# =================== 更新的路由設定 ===================
+# =================== 主要路由 ===================
 
 @app.route('/')
 def index():
@@ -96,7 +99,7 @@ def index():
 
 @app.route('/teaching-insights')
 def teaching_insights():
-    """教師分析後台 - 整合匯出功能"""
+    """教師分析後台 - 整合匯出功能（REAL DATA ONLY）"""
     try:
         if REAL_ANALYTICS_AVAILABLE:
             real_data = get_real_teaching_insights()
@@ -146,7 +149,153 @@ def teaching_insights():
         <div style="font-family: sans-serif; padding: 20px; text-align: center;">
             <h1>❌ 教師分析後台載入失敗</h1>
             <p>錯誤: {str(e)}</p>
-            <a href="/" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回首頁</a>
+            <div style="background: #f8d7da; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <strong>可能原因：</strong>
+                <ul style="text-align: left; max-width: 500px; margin: 0 auto;">
+                    <li>資料庫連接問題</li>
+                    <li>真實資料分析模組載入失敗</li>
+                    <li>查詢權限不足</li>
+                </ul>
+            </div>
+            <div style="margin-top: 20px;">
+                <a href="/health" style="padding: 10px 20px; background: #17a2b8; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏥 系統健康檢查</a>
+                <a href="/" style="padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏠 返回首頁</a>
+            </div>
+        </div>
+        """, 500
+
+@app.route('/conversation-summaries')
+def conversation_summaries():
+    """對話摘要頁面 - REAL DATA ONLY"""
+    try:
+        if REAL_ANALYTICS_AVAILABLE:
+            real_data = get_real_conversation_summaries()
+            
+            return render_template_string(
+                CONVERSATION_SUMMARIES_TEMPLATE,
+                summaries=real_data['summaries'],
+                insights=real_data['insights'],
+                real_data_message=real_data.get('message', ''),
+                current_time=datetime.datetime.now()
+            )
+        else:
+            return f"""
+            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+                <h1>❌ 真實資料分析模組未載入</h1>
+                <p>對話摘要需要真實資料分析模組</p>
+                <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
+            </div>
+            """
+            
+    except Exception as e:
+        logger.error(f"Conversation summaries error: {e}")
+        return f"""
+        <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+            <h1>❌ 對話摘要載入失敗</h1>
+            <p>錯誤: {str(e)}</p>
+            <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
+        </div>
+        """, 500
+
+@app.route('/learning-recommendations')
+def learning_recommendations():
+    """學習建議頁面 - REAL DATA ONLY"""
+    try:
+        if REAL_ANALYTICS_AVAILABLE:
+            real_data = get_real_student_recommendations()
+            
+            return render_template_string(
+                LEARNING_RECOMMENDATIONS_TEMPLATE,
+                recommendations=real_data['recommendations'],
+                overview=real_data['overview'],
+                real_data_message=real_data.get('message', ''),
+                current_time=datetime.datetime.now()
+            )
+        else:
+            return f"""
+            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+                <h1>❌ 真實資料分析模組未載入</h1>
+                <p>學習建議需要真實資料分析模組</p>
+                <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
+            </div>
+            """
+            
+    except Exception as e:
+        logger.error(f"Learning recommendations error: {e}")
+        return f"""
+        <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+            <h1>❌ 學習建議載入失敗</h1>
+            <p>錯誤: {str(e)}</p>
+            <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
+        </div>
+        """, 500
+
+@app.route('/students')
+def students():
+    """學生列表頁面"""
+    try:
+        students = list(Student.select().order_by(Student.last_active.desc()))
+        return render_template_string(STUDENTS_TEMPLATE, students=students)
+    except Exception as e:
+        app.logger.error(f"學生列表錯誤: {e}")
+        return render_template_string(STUDENTS_TEMPLATE, students=[])
+
+@app.route('/student/<int:student_id>')
+def student_detail(student_id):
+    """學生詳細頁面"""
+    try:
+        student = Student.get_by_id(student_id)
+        messages = list(Message.select().where(
+            Message.student == student
+        ).order_by(Message.timestamp.desc()).limit(20))
+        
+        analysis = analyze_student_patterns(student_id)
+        
+        return render_template_string(
+            STUDENT_DETAIL_TEMPLATE,
+            student=student,
+            messages=messages,
+            analysis=analysis
+        )
+    except Exception as e:
+        logger.error(f"獲取學生詳細資料時發生錯誤: {e}")
+        return f"""
+        <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+            <h1>❌ 學生詳細資料載入失敗</h1>
+            <p>錯誤: {str(e)}</p>
+            <div style="margin-top: 20px;">
+                <a href="/students" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">👥 返回學生列表</a>
+                <a href="/" style="padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏠 返回首頁</a>
+            </div>
+        </div>
+        """, 500
+
+@app.route('/storage-management')
+def storage_management():
+    """儲存管理頁面"""
+    try:
+        if REAL_ANALYTICS_AVAILABLE:
+            real_storage_info = get_real_storage_management()
+            return render_template_string(
+                STORAGE_MANAGEMENT_TEMPLATE,
+                storage_stats=real_storage_info,
+                real_data_info=real_storage_info
+            )
+        else:
+            return f"""
+            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+                <h1>❌ 真實資料分析模組未載入</h1>
+                <p>儲存管理需要真實資料分析模組</p>
+                <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
+            </div>
+            """
+    except Exception as e:
+        logger.error(f"Storage management error: {e}")
+        return f"""
+        <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+            <h1>❌ 儲存管理載入失敗</h1>
+            <p>錯誤: {str(e)}</p>
+            <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
         </div>
         """, 500
 
@@ -172,16 +321,18 @@ def export_data_api(export_type):
             except:
                 parsed_date_range = None
         
-        # 導入匯出函數
-        from data_management import perform_data_export
-        
         # 根據匯出類型執行不同的匯出邏輯
         if export_type == 'conversations':
             result = export_conversation_data(export_format, parsed_date_range, export_content)
         elif export_type == 'analysis':
             result = export_analysis_data(export_format, parsed_date_range, export_content)
         elif export_type in ['comprehensive', 'academic_paper', 'progress_report', 'analytics_summary']:
-            result = perform_data_export(export_type, export_format, parsed_date_range)
+            # 使用已存在的匯出函數（如果有 data_management.py）
+            try:
+                from data_management import perform_data_export
+                result = perform_data_export(export_type, export_format, parsed_date_range)
+            except ImportError:
+                result = export_comprehensive_data(export_format, parsed_date_range, export_content)
         else:
             return jsonify({'error': 'Unknown export type'}), 400
         
@@ -205,8 +356,6 @@ def export_data_api(export_type):
 def download_file(filename):
     """檔案下載端點"""
     try:
-        from flask import send_file
-        
         # 安全檢查
         allowed_extensions = {'.json', '.csv', '.xlsx', '.pdf', '.zip', '.txt'}
         file_ext = os.path.splitext(filename)[1].lower()
@@ -221,7 +370,55 @@ def download_file(filename):
         app.logger.error(f"檔案下載錯誤: {e}")
         return "Download failed", 500
 
-# =================== 新增的匯出函數 ===================
+# =================== API 路由 ===================
+
+@app.route('/api/student-analysis/<int:student_id>')
+def student_analysis_api(student_id):
+    """學生分析 API"""
+    try:
+        analysis = analyze_student_patterns(student_id)
+        return jsonify(analysis)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/dashboard-stats')
+def dashboard_stats_api():
+    """儀表板統計 API"""
+    try:
+        if REAL_ANALYTICS_AVAILABLE:
+            real_data = get_real_teaching_insights()
+            return jsonify({
+                'success': True,
+                'stats': real_data['stats'],
+                'last_updated': datetime.datetime.now().isoformat()
+            })
+        else:
+            return jsonify({'error': 'Real analytics not available'}), 503
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/class-statistics')
+def class_statistics_api():
+    """班級統計 API"""
+    try:
+        stats = {
+            'total_students': Student.select().count(),
+            'total_messages': Message.select().count(),
+            'active_students_today': Student.select().where(
+                Student.last_active >= datetime.datetime.now().date()
+            ).count(),
+            'avg_messages_per_student': 0,
+            'common_question_types': ['文法', '詞彙', '發音']
+        }
+        
+        if stats['total_students'] > 0:
+            stats['avg_messages_per_student'] = stats['total_messages'] / stats['total_students']
+        
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# =================== 匯出函數 ===================
 
 def export_conversation_data(format_type, date_range, content_type):
     """匯出對話記錄資料"""
@@ -260,7 +457,6 @@ def export_conversation_data(format_type, date_range, content_type):
         # 根據格式匯出
         if format_type == 'json':
             filename += '.json'
-            import json
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump({
                     'export_info': {
@@ -275,7 +471,6 @@ def export_conversation_data(format_type, date_range, content_type):
                 
         elif format_type == 'csv':
             filename += '.csv'
-            import csv
             with open(filename, 'w', newline='', encoding='utf-8') as f:
                 if export_data:
                     writer = csv.DictWriter(f, fieldnames=export_data[0].keys())
@@ -318,7 +513,6 @@ def export_analysis_data(format_type, date_range, content_type):
         # 根據格式匯出
         if format_type == 'json':
             filename += '.json'
-            import json
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(analysis_data, f, ensure_ascii=False, indent=2)
                 
@@ -344,6 +538,66 @@ def export_analysis_data(format_type, date_range, content_type):
         
     except Exception as e:
         app.logger.error(f"分析資料匯出錯誤: {e}")
+        return {'success': False, 'error': str(e)}
+
+def export_comprehensive_data(format_type, date_range, content_type):
+    """匯出綜合資料"""
+    try:
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'comprehensive_data_{timestamp}'
+        
+        # 收集所有資料
+        all_data = {
+            'export_info': {
+                'type': 'comprehensive_data',
+                'timestamp': timestamp,
+                'date_range': date_range,
+                'content_type': content_type
+            },
+            'conversations': [],
+            'analysis': {},
+            'statistics': {}
+        }
+        
+        # 收集對話資料
+        conversation_result = export_conversation_data('dict', date_range, content_type)
+        if conversation_result.get('success'):
+            all_data['conversations'] = conversation_result.get('data', [])
+        
+        # 收集分析資料
+        analysis_result = export_analysis_data('dict', date_range, content_type)
+        if analysis_result.get('success'):
+            all_data['analysis'] = analysis_result.get('data', {})
+        
+        # 根據格式匯出
+        if format_type == 'json':
+            filename += '.json'
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(all_data, f, ensure_ascii=False, indent=2)
+        elif format_type == 'zip':
+            filename += '.zip'
+            with zipfile.ZipFile(filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # 添加各種格式的檔案到壓縮包
+                json_content = json.dumps(all_data, ensure_ascii=False, indent=2)
+                zipf.writestr('comprehensive_data.json', json_content)
+                
+                if all_data['conversations']:
+                    csv_content = StringIO()
+                    writer = csv.DictWriter(csv_content, fieldnames=all_data['conversations'][0].keys())
+                    writer.writeheader()
+                    writer.writerows(all_data['conversations'])
+                    zipf.writestr('conversations.csv', csv_content.getvalue())
+        
+        file_size = os.path.getsize(filename) if os.path.exists(filename) else 0
+        
+        return {
+            'success': True,
+            'filename': filename,
+            'size': file_size
+        }
+        
+    except Exception as e:
+        app.logger.error(f"綜合資料匯出錯誤: {e}")
         return {'success': False, 'error': str(e)}
 
 # =================== 輔助分析函數 ===================
@@ -396,68 +650,6 @@ def get_teaching_recommendations_data(date_range):
             'priority': 'medium'
         }
     ]
-
-# =================== 其他路由保持不變 ===================
-
-@app.route('/students')
-def students():
-    """學生列表頁面"""
-    try:
-        students = list(Student.select().order_by(Student.last_active.desc()))
-        return render_template_string(STUDENTS_TEMPLATE, students=students)
-    except Exception as e:
-        app.logger.error(f"學生列表錯誤: {e}")
-        return render_template_string(STUDENTS_TEMPLATE, students=[])
-
-@app.route('/student/<int:student_id>')
-def student_detail(student_id):
-    """學生詳細頁面"""
-    try:
-        student = Student.get_by_id(student_id)
-        messages = list(Message.select().where(
-            Message.student == student
-        ).order_by(Message.timestamp.desc()).limit(20))
-        
-        analysis = analyze_student_patterns(student_id)
-        
-        return render_template_string(
-            STUDENT_DETAIL_TEMPLATE,
-            student=student,
-            messages=messages,
-            analysis=analysis
-        )
-    except Exception as e:
-        app.logger.error(f"學生詳細頁面錯誤: {e}")
-        return f"學生資料載入失敗: {str(e)}", 500
-
-@app.route('/storage-management')
-def storage_management():
-    """儲存管理頁面"""
-    try:
-        if REAL_ANALYTICS_AVAILABLE:
-            real_storage_info = get_real_storage_management()
-            return render_template_string(
-                STORAGE_MANAGEMENT_TEMPLATE,
-                storage_stats=real_storage_info,
-                real_data_info=real_storage_info
-            )
-        else:
-            return f"""
-            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-                <h1>❌ 真實資料分析模組未載入</h1>
-                <p>儲存管理需要真實資料分析模組</p>
-                <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
-            </div>
-            """
-    except Exception as e:
-        logger.error(f"Storage management error: {e}")
-        return f"""
-        <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-            <h1>❌ 儲存管理載入失敗</h1>
-            <p>錯誤: {str(e)}</p>
-            <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
-        </div>
-        """, 500
 
 # =================== LINE Bot Webhook ===================
 
@@ -525,7 +717,7 @@ def handle_message(event):
                 TextSendMessage(text="抱歉，系統暫時無法處理您的訊息，請稍後再試。")
             )
 
-# =================== 健康檢查 ===================
+# =================== 健康檢查和狀態路由 ===================
 
 @app.route('/health')
 def health_check():
@@ -569,6 +761,90 @@ def health_check():
             'timestamp': datetime.datetime.now().isoformat()
         }, 500
 
+@app.route('/real-data-status')
+def real_data_status():
+    """真實資料狀態檢查"""
+    try:
+        if REAL_ANALYTICS_AVAILABLE:
+            real_data = get_real_teaching_insights()
+            return render_template_string(f"""
+            <div style="font-family: sans-serif; padding: 20px;">
+                <h1>📊 真實資料狀態報告</h1>
+                <div style="background: #e7f3ff; padding: 15px; margin: 15px 0; border-radius: 5px;">
+                    <h3>✅ 資料分析模組狀態：正常</h3>
+                    <p><strong>真實學生數：</strong>{real_data['stats']['real_students']}</p>
+                    <p><strong>總訊息數：</strong>{real_data['stats']['total_messages']}</p>
+                    <p><strong>最後更新：</strong>{real_data['last_updated']}</p>
+                </div>
+                {real_data.get('no_real_data_message', '') if real_data['stats']['real_students'] == 0 else ''}
+                <a href="/teaching-insights">返回分析後台</a>
+            </div>
+            """)
+        else:
+            return """
+            <div style="font-family: sans-serif; padding: 20px;">
+                <h1>❌ 真實資料分析模組未載入</h1>
+                <p>請檢查 fixed_analytics.py 檔案是否存在並正確配置。</p>
+                <a href="/">返回首頁</a>
+            </div>
+            """
+    except Exception as e:
+        return f"""
+        <div style="font-family: sans-serif; padding: 20px;">
+            <h1>❌ 真實資料狀態檢查失敗</h1>
+            <p>錯誤：{str(e)}</p>
+            <a href="/">返回首頁</a>
+        </div>
+        """, 500
+
+# =================== 測試和開發路由 ===================
+
+@app.route('/create-sample-data')
+def create_sample_data_route():
+    """創建樣本資料（僅供開發測試使用）"""
+    try:
+        result = create_sample_data()
+        return jsonify({
+            'success': True,
+            'message': '樣本資料創建成功',
+            'created': result
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# =================== 錯誤處理 ===================
+
+@app.errorhandler(404)
+def not_found(error):
+    """404 錯誤處理"""
+    return f"""
+    <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+        <h1>🔍 頁面不存在</h1>
+        <p>您要訪問的頁面不存在。</p>
+        <div style="margin-top: 20px;">
+            <a href="/" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏠 返回首頁</a>
+            <a href="/teaching-insights" style="padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">📊 分析後台</a>
+        </div>
+    </div>
+    """, 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    """500 錯誤處理"""
+    return f"""
+    <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+        <h1>⚠️ 伺服器錯誤</h1>
+        <p>系統遇到內部錯誤，請稍後再試。</p>
+        <div style="margin-top: 20px;">
+            <a href="/" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏠 返回首頁</a>
+            <a href="/health" style="padding: 10px 20px; background: #17a2b8; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏥 系統檢查</a>
+        </div>
+    </div>
+    """, 500
+
 # =================== 程式進入點 ===================
 
 if __name__ == "__main__":
@@ -587,13 +863,19 @@ if __name__ == "__main__":
         logger.info("   - 首頁: / （真實資料統計）")
         logger.info("   - 學生管理: /students （真實學生資料）")
         logger.info("   - 教師洞察: /teaching-insights （整合匯出功能）")
+        logger.info("   - 對話摘要: /conversation-summaries （真實對話分析）")
+        logger.info("   - 學習建議: /learning-recommendations （個人化建議）")
         logger.info("   - 儲存管理: /storage-management （真實儲存使用量）")
         logger.info("   ❌ 資料匯出中心: /data-export （已移除，功能整合到教師洞察）")
     
     logger.info("🔧 API 端點:")
     logger.info("   - 健康檢查: /health")
+    logger.info("   - 真實資料狀態: /real-data-status")
     logger.info("   - 資料匯出: /api/export/<type>")
     logger.info("   - 檔案下載: /download/<filename>")
+    logger.info("   - 學生分析: /api/student-analysis/<id>")
+    logger.info("   - 儀表板統計: /api/dashboard-stats")
+    logger.info("   - 班級統計: /api/class-statistics")
     logger.info("   - LINE Bot Webhook: /callback")
     
     logger.info("✅ 重要更新：")
@@ -601,6 +883,7 @@ if __name__ == "__main__":
     logger.info("   ✅ 移除獨立的資料匯出中心頁面")
     logger.info("   ✅ 新增對話記錄和分析報告匯出 API")
     logger.info("   ✅ 支援多種匯出格式（JSON, CSV, PDF, Excel）")
+    logger.info("   ✅ 保留所有原有功能和路由")
     
     app.run(
         debug=debug,
