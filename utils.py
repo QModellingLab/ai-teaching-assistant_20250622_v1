@@ -2,7 +2,6 @@ import os
 import json
 import datetime
 import logging
-import random
 import google.generativeai as genai
 from models import Student, Message, Analysis, db
 
@@ -49,15 +48,16 @@ else:
     logger.warning("⚠️ Gemini API key not found")
 
 # =========================================
-# 新增：對話會話管理
+# 對話會話管理 - 增強版本
 # =========================================
 
 class ConversationManager:
-    """對話會話管理器"""
+    """對話會話管理器 - 增強記憶能力"""
     
     def __init__(self):
-        self.max_context_turns = 8  # 保留最近8輪對話
-        self.session_timeout = 2    # 2小時無活動則會話暫停
+        self.max_context_turns = 30  # 增加到30輪對話
+        self.session_timeout = 24    # 延長到24小時
+        self.topic_continuity_threshold = 0.7  # 主題相關性門檻
     
     def get_session_id(self, student_id, group_id=None):
         """生成會話ID"""
@@ -68,11 +68,11 @@ class ConversationManager:
             return f"private_{student_id}_{today}"
     
     def get_conversation_context(self, student_id, group_id=None):
-        """取得對話上下文"""
+        """取得增強的對話上下文"""
         try:
             session_id = self.get_session_id(student_id, group_id)
             
-            # 取得最近的對話記錄
+            # 取得最近的對話記錄（延長時間窗口）
             cutoff_time = datetime.datetime.now() - datetime.timedelta(hours=self.session_timeout)
             
             recent_messages = list(Message.select().where(
@@ -89,44 +89,22 @@ class ConversationManager:
             # 格式化對話上下文
             context_parts = []
             for msg in recent_messages:
-                # 包含學生訊息和AI回應
+                # 包含學生訊息
                 if msg.message_type in ['question', 'statement']:
                     context_parts.append(f"Student: {msg.content}")
-                    
-                    # 查找對應的AI回應
-                    ai_response = self.get_ai_response_for_message(msg.id)
-                    if ai_response:
-                        context_parts.append(f"AI: {ai_response}")
             
-            # 限制上下文長度
-            context = "\n".join(context_parts[-6:])  # 最近3輪對話
+            # 限制上下文長度，但保留更多對話
+            context = "\n".join(context_parts[-12:])  # 最近6輪對話
             return context
             
         except Exception as e:
             logger.error(f"❌ 取得對話上下文錯誤: {e}")
             return ""
     
-    def get_ai_response_for_message(self, message_id):
-        """取得訊息對應的AI回應"""
-        try:
-            # 可以從 AIResponse 表或其他地方取得
-            # 這裡先簡化處理
-            return None
-        except Exception as e:
-            logger.error(f"取得AI回應錯誤: {e}")
-            return None
-    
     def save_conversation_turn(self, student_id, user_message, ai_response, group_id=None):
         """儲存一輪對話"""
         try:
             session_id = self.get_session_id(student_id, group_id)
-            
-            # 儲存學生訊息（如果還沒儲存）
-            # 這通常在 LINE webhook 處理時已經儲存
-            
-            # 儲存AI回應記錄（如果需要專門的表）
-            # 可以新增 AIResponse 模型來記錄
-            
             logger.info(f"✅ 儲存對話輪次: {session_id}")
             
         except Exception as e:
@@ -136,7 +114,7 @@ class ConversationManager:
 conversation_manager = ConversationManager()
 
 # =========================================
-# 新增：問題分類系統
+# 問題分類系統
 # =========================================
 
 QUESTION_CATEGORIES = {
@@ -237,11 +215,11 @@ Return ONLY a JSON object in this exact format:
         return None
 
 # =========================================
-# 更新：改進的 AI 回應函數（英文為主）
+# AI 回應函數（英文為主）- 純真實資料版本
 # =========================================
 
 def get_ai_response(query, student_id=None, group_id=None):
-    """取得 AI 回應 - 英文為主，支援對話上下文"""
+    """取得 AI 回應 - 英文為主，支援增強對話上下文，只處理真實學生"""
     try:
         if not model:
             logger.error("❌ AI 模型未初始化")
@@ -250,23 +228,31 @@ def get_ai_response(query, student_id=None, group_id=None):
         if not query or len(query.strip()) == 0:
             return "Please provide your question, and I'll be happy to help you!"
         
-        # 取得學生資訊和對話上下文
+        # 取得學生資訊和對話上下文（只處理真實學生）
         student_context = ""
         conversation_context = ""
         
         if student_id:
             try:
                 student = Student.get_by_id(student_id)
+                
+                # 確保不是演示學生
+                if student.name.startswith('[DEMO]') or student.line_user_id.startswith('demo_'):
+                    logger.warning(f"⚠️ 跳過演示學生: {student.name}")
+                    return "This appears to be a demo account. Please use a real student account."
+                
                 student_context = f"Student: {student.name} (Participation: {student.participation_rate}%)"
                 
-                # 取得對話上下文
+                # 取得增強的對話上下文
                 conversation_context = conversation_manager.get_conversation_context(student_id, group_id)
                 
             except Exception as e:
                 logger.warning(f"無法取得學生資訊: {e}")
         
-        # 問題分類分析
-        question_analysis = analyze_question_type(query, student_context)
+        # 問題分類分析（只對真實學生）
+        question_analysis = None
+        if student_id and not (student.name.startswith('[DEMO]') or student.line_user_id.startswith('demo_')):
+            question_analysis = analyze_question_type(query, student_context)
         
         # 為 EMI 教學優化的英文提示詞
         prompt = f"""You are a professional EMI (English as Medium of Instruction) teaching assistant for university students. Your goal is to help students learn and understand concepts in English while being supportive and educational.
@@ -307,12 +293,13 @@ Please provide a helpful response (100-150 words):"""
             ai_response = response.text.strip()
             logger.info(f"✅ AI 英文回應成功生成，長度: {len(ai_response)} 字")
             
-            # 儲存對話輪次
-            conversation_manager.save_conversation_turn(student_id, query, ai_response, group_id)
-            
-            # 儲存問題分析結果
-            if question_analysis and student_id:
-                save_question_analysis(student_id, query, question_analysis)
+            # 儲存對話輪次（只對真實學生）
+            if student_id and not (student.name.startswith('[DEMO]') or student.line_user_id.startswith('demo_')):
+                conversation_manager.save_conversation_turn(student_id, query, ai_response, group_id)
+                
+                # 儲存問題分析結果
+                if question_analysis:
+                    save_question_analysis(student_id, query, question_analysis)
             
             return ai_response
         else:
@@ -338,23 +325,18 @@ Please provide a helpful response (100-150 words):"""
             return f"An error occurred while processing your question. Please try again later."
 
 def save_question_analysis(student_id, question, analysis_result):
-    """儲存問題分析結果"""
+    """儲存問題分析結果（只對真實學生）"""
     try:
         if not analysis_result:
             return
-            
-        # 更新訊息記錄中的分析資料
-        recent_message = Message.select().where(
-            (Message.student_id == student_id) &
-            (Message.content == question)
-        ).order_by(Message.timestamp.desc()).first()
         
-        if recent_message:
-            # 如果 Message 模型有相關欄位，就更新
-            # 這裡需要根據您的實際 Message 模型結構調整
-            pass
+        # 確保學生是真實學生
+        student = Student.get_by_id(student_id)
+        if student.name.startswith('[DEMO]') or student.line_user_id.startswith('demo_'):
+            logger.warning(f"⚠️ 跳過演示學生的分析儲存: {student.name}")
+            return
             
-        # 也可以儲存到 Analysis 表
+        # 儲存到 Analysis 表
         Analysis.create(
             student_id=student_id,
             analysis_type='question_classification',
@@ -369,17 +351,21 @@ def save_question_analysis(student_id, question, analysis_result):
         logger.error(f"❌ 儲存問題分析錯誤: {e}")
 
 # =========================================
-# 保留原有函數（稍作調整）
+# 學生模式分析 - 只分析真實學生
 # =========================================
 
 def analyze_student_patterns(student_id):
-    """分析學生學習模式 - 更新為英文分析"""
+    """分析學生學習模式 - 只分析真實學生"""
     try:
         if not model:
             logger.warning("⚠️ AI 模型未初始化，無法進行分析")
             return None
             
         student = Student.get_by_id(student_id)
+        
+        # 確保不是演示學生
+        if student.name.startswith('[DEMO]') or student.line_user_id.startswith('demo_'):
+            return "This is a demo account. Real student analysis is only available for actual students."
         
         # 取得最近訊息
         recent_messages = list(Message.select().where(
@@ -438,15 +424,17 @@ Analysis Report:"""
         return f"Analysis error occurred: {str(e)[:50]}..."
 
 # =========================================
-# 新增：取得問題分類統計
+# 問題分類統計 - 只統計真實學生資料
 # =========================================
 
 def get_question_category_stats():
-    """取得問題分類統計"""
+    """取得問題分類統計 - 只統計真實學生"""
     try:
-        # 取得所有問題分析記錄
-        analyses = list(Analysis.select().where(
-            Analysis.analysis_type == 'question_classification'
+        # 只取得真實學生的問題分析記錄
+        analyses = list(Analysis.select().join(Student).where(
+            (Analysis.analysis_type == 'question_classification') &
+            (~Student.name.startswith('[DEMO]')) &
+            (~Student.line_user_id.startswith('demo_'))
         ))
         
         if not analyses:
@@ -501,8 +489,14 @@ def get_question_category_stats():
         return {}
 
 def get_student_conversation_summary(student_id, days=7):
-    """取得學生對話摘要"""
+    """取得學生對話摘要 - 只處理真實學生"""
     try:
+        student = Student.get_by_id(student_id)
+        
+        # 確保不是演示學生
+        if student.name.startswith('[DEMO]') or student.line_user_id.startswith('demo_'):
+            return "This is a demo account. Conversation summaries are only available for real students."
+        
         cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days)
         
         messages = list(Message.select().where(
@@ -530,7 +524,7 @@ def get_student_conversation_summary(student_id, days=7):
         return "Error generating conversation summary."
 
 # =========================================
-# 保留原有的其他函數
+# 工具函數
 # =========================================
 
 def test_ai_connection():
@@ -550,34 +544,6 @@ def test_ai_connection():
     except Exception as e:
         return False, f"Connection error: {str(e)[:60]}..."
 
-def list_available_models():
-    """列出可用的模型"""
-    try:
-        if not GEMINI_API_KEY:
-            return ["No API key"]
-        
-        genai.configure(api_key=GEMINI_API_KEY)
-        models = []
-        
-        try:
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    models.append(m.name)
-        except Exception as e:
-            logger.warning(f"無法動態列出模型: {e}")
-            # 根據官方文件返回已知可用模型
-            models = [
-                'models/gemini-2.0-flash-001',
-                'models/gemini-2.0-flash-lite-001',
-                'models/gemini-2.0-flash',
-                'models/gemini-2.0-flash-lite'
-            ]
-            
-        return models
-    except Exception as e:
-        logger.error(f"列出模型時錯誤: {e}")
-        return [f"錯誤：{str(e)[:50]}"]
-
 def get_model_info():
     """取得當前模型資訊"""
     if not model:
@@ -586,136 +552,48 @@ def get_model_info():
     return current_model_name or "未知模型"
 
 def update_student_stats(student_id):
-    """更新學生統計資料"""
+    """更新學生統計資料 - 只更新真實學生"""
     try:
         student = Student.get_by_id(student_id)
+        
+        # 確保不是演示學生
+        if student.name.startswith('[DEMO]') or student.line_user_id.startswith('demo_'):
+            logger.warning(f"⚠️ 跳過演示學生統計更新: {student.name}")
+            return
+        
         student.update_stats()
         logger.info(f"✅ 更新學生統計: {student.name}")
     except Exception as e:
         logger.error(f"❌ 更新統計錯誤: {e}")
 
-def create_sample_data():
-    """建立範例資料"""
-    try:
-        sample_students = [
-            {
-                'name': '[DEMO] 王小明',
-                'line_user_id': 'demo_student_001',
-                'message_count': 25,
-                'question_count': 8,
-                'participation_rate': 75.5,
-                'question_rate': 32.0,
-                'learning_style': '主動探索型',
-                'notes': '系統演示用虛擬學生資料'
-            },
-            {
-                'name': '[DEMO] 李美華',
-                'line_user_id': 'demo_student_002', 
-                'message_count': 18,
-                'question_count': 12,
-                'participation_rate': 68.2,
-                'question_rate': 66.7,
-                'learning_style': '問題導向型',
-                'notes': '系統演示用虛擬學生資料'
-            },
-            {
-                'name': '[DEMO] John Smith',
-                'line_user_id': 'demo_student_003',
-                'message_count': 32,
-                'question_count': 5,
-                'participation_rate': 82.3,
-                'question_rate': 15.6,
-                'learning_style': '實作導向型',
-                'notes': '系統演示用虛擬學生資料'
-            }
-        ]
-        
-        for student_data in sample_students:
-            try:
-                existing = Student.select().where(
-                    Student.line_user_id == student_data['line_user_id']
-                ).first()
-                
-                if not existing:
-                    student = Student.create(**{
-                        **student_data,
-                        'created_at': datetime.datetime.now() - datetime.timedelta(days=random.randint(1, 30)),
-                        'last_active': datetime.datetime.now() - datetime.timedelta(hours=random.randint(1, 48))
-                    })
-                    
-                    create_sample_messages(student)
-                    logger.info(f"✅ 建立演示學生: {student.name}")
-                    
-            except Exception as e:
-                logger.error(f"❌ 建立演示學生錯誤: {e}")
-                
-    except Exception as e:
-        logger.error(f"❌ 建立演示資料錯誤: {e}")
-
-def create_sample_messages(student):
-    """建立演示訊息"""
-    try:
-        sample_messages = [
-            {'content': 'What is machine learning?', 'type': 'question'},
-            {'content': 'Thanks for the explanation!', 'type': 'statement'},
-            {'content': 'Can you give me some examples?', 'type': 'question'},
-            {'content': 'This is very helpful', 'type': 'statement'},
-            {'content': 'How is AI different from ML?', 'type': 'question'},
-            {'content': 'I understand now!', 'type': 'statement'},
-            {'content': 'Are there any recommended books?', 'type': 'question'},
-        ]
-        
-        messages_to_create = min(len(sample_messages), student.message_count)
-        
-        for i in range(messages_to_create):
-            msg_data = sample_messages[i % len(sample_messages)]
-            Message.create(
-                student=student,
-                content=msg_data['content'],
-                message_type=msg_data['type'],
-                timestamp=datetime.datetime.now() - datetime.timedelta(hours=random.randint(1, 72)),
-                source_type='demo'
-            )
-                
-    except Exception as e:
-        logger.error(f"❌ 建立演示訊息錯誤: {e}")
-
-def validate_environment():
-    """驗證環境變數"""
-    required_vars = ['GEMINI_API_KEY', 'CHANNEL_ACCESS_TOKEN', 'CHANNEL_SECRET']
-    missing_vars = []
-    
-    for var in required_vars:
-        value = os.getenv(var) or os.getenv(f'LINE_{var}')
-        if not value:
-            missing_vars.append(var)
-    
-    if missing_vars:
-        logger.error(f"❌ 缺少環境變數: {', '.join(missing_vars)}")
-        return False
-    
-    logger.info("✅ 環境變數驗證通過")
-    return True
-
 def get_system_status():
-    """取得系統狀態"""
+    """取得系統狀態 - 真實資料版本"""
     try:
         ai_ok, ai_msg = test_ai_connection()
-        available_models = list_available_models()
+        
+        # 只統計真實資料
+        real_students = Student.select().where(
+            (~Student.name.startswith('[DEMO]')) &
+            (~Student.line_user_id.startswith('demo_'))
+        ).count()
+        
+        real_messages = Message.select().join(Student).where(
+            (~Student.name.startswith('[DEMO]')) &
+            (~Student.line_user_id.startswith('demo_')) &
+            (Message.source_type != 'demo')
+        ).count()
         
         status = {
             'database': 'connected' if not db.is_closed() else 'disconnected',
             'ai_service': 'available' if ai_ok else 'error',
             'ai_message': ai_msg,
             'current_model': get_model_info(),
-            'available_models': available_models[:8],
-            'total_students': Student.select().count(),
-            'real_students': Student.select().where(~Student.name.startswith('[DEMO]')).count(),
-            'demo_students': Student.select().where(Student.name.startswith('[DEMO]')).count(),
-            'total_messages': Message.select().count(),
+            'real_students': real_students,
+            'real_messages': real_messages,
+            'has_real_data': real_students > 0 and real_messages > 0,
             'model_info': f'使用 Gemini 2.0 系列模型（EMI 教學優化）',
-            'conversation_manager': 'enabled',
-            'question_analysis': 'enabled',
+            'conversation_manager': 'enhanced',
+            'question_analysis': 'real_data_only',
             'last_update': datetime.datetime.now().isoformat()
         }
         
@@ -726,23 +604,16 @@ def get_system_status():
         return {'error': str(e)}
 
 def initialize_utils():
-    """初始化工具模組"""
-    logger.info("🔧 初始化增強版 utils 模組...")
-    
-    env_ok = validate_environment()
-    if not env_ok:
-        logger.warning("⚠️ 環境變數檢查未通過")
+    """初始化工具模組 - 真實資料版本"""
+    logger.info("🔧 初始化真實資料版 utils 模組...")
     
     ai_ok, ai_msg = test_ai_connection()
     logger.info(f"🤖 AI 狀態: {ai_msg}")
     
-    models = list_available_models()
-    if models:
-        logger.info(f"📋 可用模型: {', '.join(models[:3])}...")
-    
     logger.info(f"🚀 當前使用模型: {get_model_info()}")
-    logger.info("🌐 功能: 英文回應 + 對話記憶 + 問題分類")
-    logger.info("✅ 增強版 Utils 模組初始化完成")
+    logger.info("🌐 功能: 英文回應 + 增強對話記憶 + 問題分類")
+    logger.info("🎯 資料處理: 只分析真實學生資料")
+    logger.info("✅ 真實資料版 Utils 模組初始化完成")
 
 # 自動執行初始化
 initialize_utils()
