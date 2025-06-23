@@ -39,17 +39,50 @@ except ImportError as e:
     logging.error(f"❌ Failed to load improved analytics module: {e}")
 
 # 導入 Web 管理後台模板
+# Emergency template import fix
+import logging
+
 try:
+    # Try the simplest approach first
+    from templates_utils import get_template, ERROR_TEMPLATE, HEALTH_TEMPLATE
     from templates_main import INDEX_TEMPLATE, STUDENTS_TEMPLATE, STUDENT_DETAIL_TEMPLATE
-    from templates_analysis_part1 import TEACHING_INSIGHTS_TEMPLATE
-    from templates_analysis_part2 import CONVERSATION_SUMMARIES_TEMPLATE
-    from templates_analysis_part3 import LEARNING_RECOMMENDATIONS_TEMPLATE
-    from templates_management import STORAGE_MANAGEMENT_TEMPLATE
+    
+    # Try analysis templates individually
+    try:
+        from templates_analysis_part1 import TEACHING_INSIGHTS_TEMPLATE
+    except ImportError:
+        TEACHING_INSIGHTS_TEMPLATE = ""
+        
+    try:
+        from templates_analysis_part2 import CONVERSATION_SUMMARIES_TEMPLATE
+    except ImportError:
+        CONVERSATION_SUMMARIES_TEMPLATE = ""
+        
+    try:
+        from templates_analysis_part3 import LEARNING_RECOMMENDATIONS_TEMPLATE
+    except ImportError:
+        LEARNING_RECOMMENDATIONS_TEMPLATE = ""
+        
+    try:
+        from templates_management import STORAGE_MANAGEMENT_TEMPLATE
+    except ImportError:
+        STORAGE_MANAGEMENT_TEMPLATE = ""
+    
     WEB_TEMPLATES_AVAILABLE = True
     logging.info("✅ Web management templates loaded successfully")
+    
 except ImportError as e:
     WEB_TEMPLATES_AVAILABLE = False
     logging.warning(f"⚠️ Web management templates load failed: {e}")
+    
+    # Create minimal fallbacks
+    INDEX_TEMPLATE = STUDENTS_TEMPLATE = STUDENT_DETAIL_TEMPLATE = ""
+    TEACHING_INSIGHTS_TEMPLATE = CONVERSATION_SUMMARIES_TEMPLATE = ""
+    LEARNING_RECOMMENDATIONS_TEMPLATE = STORAGE_MANAGEMENT_TEMPLATE = ""
+    ERROR_TEMPLATE = HEALTH_TEMPLATE = ""
+    
+    def get_template(name):
+        return ""
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
