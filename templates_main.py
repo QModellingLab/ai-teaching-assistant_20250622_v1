@@ -1269,7 +1269,7 @@ __all__ = [
     'STUDENTS_TEMPLATE', 
     'STUDENT_DETAIL_TEMPLATE',
     'get_template'
-]; }
+]; 
         body { 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
