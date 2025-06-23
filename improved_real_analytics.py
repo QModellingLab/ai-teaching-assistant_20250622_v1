@@ -1088,18 +1088,6 @@ def get_real_data_readiness():
     """取得真實資料準備情況"""
     return data_health_checker.get_real_data_readiness()
 
-# 匯出清單
-__all__ = [
-    'has_real_student_data',
-    'get_improved_teaching_insights',
-    'get_improved_conversation_summaries',
-    'get_improved_student_recommendations',
-    'get_improved_storage_management',
-    'check_real_data_health',
-    'get_real_data_readiness',
-    'pure_real_analytics',
-    'data_health_checker'
-]
 
 # Add this at the end of your improved_real_analytics.py file
 
