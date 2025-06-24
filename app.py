@@ -1017,6 +1017,7 @@ def handle_message(event):
             return
         
         # 取得或創建學生記錄
+        
         try:
             student, created = Student.get_or_create(
                 line_user_id=user_id,
@@ -1034,7 +1035,54 @@ def handle_message(event):
             logger.error(f"❌ 學生記錄處理錯誤: {student_error}")
             # 使用預設學生 ID
             student = None
+
+try:
+    student, created = Student.get_or_create(
+        line_user_id=user_id,
+        defaults={'name': f'學生_{user_id[-4:]}'}  # 臨時名稱
+    )
+    
+    # 如果是新學生或需要更新暱稱，獲取 LINE 用戶資料
+    if created or student.name.startswith('學生_') or student.name.startswith('LINE用戶_'):
+        try:
+            # ✅ 關鍵修復：獲取 LINE 用戶資料
+            profile = line_bot_api.get_profile(user_id)
+            display_name = profile.display_name or f"用戶_{user_id[-4:]}"
+            
+            # 更新學生名稱為真實暱稱
+            old_name = student.name
+            student.name = display_name
+            student.save()
+            
+            logger.info(f"✅ 成功獲取用戶暱稱: {old_name} -> {display_name}")
+            
+        except LineBotApiError as profile_error:
+            logger.warning(f"⚠️ LINE API 錯誤，無法獲取用戶資料: {profile_error}")
+            # 如果無法獲取暱稱，使用較友善的備用名稱
+            if student.name.startswith('學生_'):
+                student.name = f"用戶_{user_id[-6:]}"
+                student.save()
+        except Exception as profile_error:
+            logger.warning(f"⚠️ 無法獲取用戶資料: {profile_error}")
+            # 如果無法獲取暱稱，保持原名稱或使用備用名稱
+            if student.name.startswith('學生_'):
+                student.name = f"用戶_{user_id[-6:]}"
+                student.save()
+    
+    logger.info(f"👤 學生記錄: {student.name} ({'新建' if created else '既有'})")
+    
+    # 確保學生名稱不是演示格式
+    if student.name.startswith('[DEMO]'):
+        student.name = f'用戶_{user_id[-4:]}'
+        student.save()
+        logger.info(f"🔄 清理演示名稱: {student.name}")
         
+except Exception as student_error:
+    logger.error(f"❌ 學生記錄處理錯誤: {student_error}")
+    # 使用預設學生 ID
+    student = None
+
+
         # 儲存訊息
         try:
             message_record = Message.create(
