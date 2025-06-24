@@ -513,6 +513,134 @@ def get_student_conversation_summary(student_id, days=30):
             'error': str(e),
             'status': 'error'
         }
+def get_fallback_response(user_message):
+    """備用回應生成器"""
+    user_msg_lower = user_message.lower()
+    
+    # 基於關鍵詞的簡單回應
+    if any(word in user_msg_lower for word in ['hello', 'hi', 'hey']):
+        return "Hello! I'm your English learning assistant. How can I help you today? 👋"
+    
+    elif any(word in user_msg_lower for word in ['grammar', 'grammer']):
+        return "I'd love to help with grammar! Can you share the specific sentence or rule you're wondering about? 📝"
+    
+    elif any(word in user_msg_lower for word in ['vocabulary', 'word', 'meaning']):
+        return "I'm here to help with vocabulary! What word would you like to learn about? 📚"
+    
+    elif any(word in user_msg_lower for word in ['pronunciation', 'pronounce', 'speak']):
+        return "Pronunciation is important! While I can't hear you speak, I can help explain how words are pronounced. What word are you working on? 🗣️"
+    
+    elif '?' in user_message:
+        return "That's a great question! I'm having some technical difficulties right now, but I'm working to get back to full functionality. Can you try asking again in a moment? 🤔"
+    
+    else:
+        return "I received your message! I'm currently having some technical issues, but I'm here to help with your English learning. Please try again in a moment. 📚"
 
+def get_ai_response_with_fallback(user_message, student_id=None):
+    """帶備案機制的 AI 回應生成"""
+    try:
+        # 檢查 API 金鑰
+        if not GEMINI_API_KEY:
+            logger.error("❌ GEMINI_API_KEY 未設定")
+            return "Hello! I'm currently being configured. Please try again soon. 👋"
+        
+        # 檢查模型初始化
+        if not model:
+            logger.error("❌ Gemini 模型未初始化")
+            return "I'm having trouble connecting to my AI brain. Please try again in a moment. 🤖"
+        
+        # 構建對話提示
+        student_context = ""
+        conversation_context = ""
+        
+        if student_id:
+            try:
+                student = Student.get_by_id(student_id)
+                student_context = f"Student: {student.name}"
+                
+                # 取得對話歷史 (最近 5 則)
+                recent_messages = list(Message.select().where(
+                    Message.student_id == student_id
+                ).order_by(Message.timestamp.desc()).limit(5))
+                
+                if recent_messages:
+                    context_parts = []
+                    for msg in reversed(recent_messages):
+                        if len(msg.content) < 100:  # 只包含較短的訊息
+                            context_parts.append(f"Previous: {msg.content}")
+                    
+                    if context_parts:
+                        conversation_context = "\n".join(context_parts[-3:])  # 最近 3 則
+                        
+            except Exception as context_error:
+                logger.warning(f"⚠️ 無法取得學生上下文: {context_error}")
+        
+        # 構建提示詞
+        prompt = f"""You are an AI Teaching Assistant for English-medium instruction (EMI) courses.
+
+{f"Previous conversation context:\n{conversation_context}\n" if conversation_context else ""}
+
+Instructions:
+- Respond primarily in clear, simple English suitable for university-level ESL learners
+- Use vocabulary appropriate for intermediate English learners
+- For technical terms, provide Chinese translation in parentheses when helpful
+- Maintain a friendly, encouraging, and educational tone
+- Keep responses concise but helpful (50-150 words)
+- If this continues a previous conversation, build on what was discussed before
+
+{student_context if student_context else ""}
+
+Student question: {user_message}
+
+Please provide a helpful response:"""
+        
+        logger.info(f"🤖 使用 Gemini 生成回應...")
+        
+        # 配置生成參數
+        generation_config = genai.types.GenerationConfig(
+            candidate_count=1,
+            max_output_tokens=300,
+            temperature=0.7,
+            top_p=0.9,
+            top_k=40
+        )
+        
+        # 生成回應
+        response = model.generate_content(prompt, generation_config=generation_config)
+        
+        if response and response.text:
+            ai_response = response.text.strip()
+            logger.info(f"✅ AI 回應成功生成，長度: {len(ai_response)} 字")
+            
+            # 基本內容檢查
+            if len(ai_response) < 10:
+                logger.warning("⚠️ AI 回應過短，使用備用回應")
+                return get_fallback_response(user_message)
+            
+            return ai_response
+        else:
+            logger.error("❌ AI 回應為空")
+            return get_fallback_response(user_message)
+            
+    except Exception as e:
+        error_msg = str(e).lower()
+        logger.error(f"❌ AI 回應錯誤: {str(e)}")
+        
+        # 智慧錯誤處理
+        if "429" in error_msg or "quota" in error_msg or "limit" in error_msg:
+            return "I'm currently experiencing high demand. Please try again in a few minutes. Thank you for your patience! 🙏"
+        elif "403" in error_msg or "unauthorized" in error_msg:
+            return "I'm having authentication issues. Please contact your teacher to check the system configuration. 🔧"
+        elif "network" in error_msg or "connection" in error_msg:
+            return "I'm having connection problems. Please try again in a moment. 📡"
+        else:
+            return get_fallback_response(user_message)
+            
 # 兼容性別名
 get_ai_response = generate_ai_response_with_smart_fallback
+
+# 在現有的 get_ai_response 函數的最後面，return 語句之前加入：
+
+        # 如果原有邏輯失敗，使用增強版本
+        logger.warning("⚠️ 原有 AI 回應邏輯失敗，使用備用機制")
+        return get_ai_response_with_fallback(query, student_id)
