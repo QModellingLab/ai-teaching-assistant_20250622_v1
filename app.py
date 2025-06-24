@@ -909,61 +909,164 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    """處理 LINE 訊息 - 只處理真實學生"""
+    """處理 LINE 訊息 - 增強版錯誤處理"""
     if not line_bot_api:
+        logger.error("❌ LINE Bot API 未初始化")
         return
     
     try:
         user_id = event.source.user_id
         user_message = event.message.text
+        logger.info(f"🔍 收到訊息: {user_id} -> {user_message[:50]}")
         
         # 確保不是演示用戶
         if user_id.startswith('demo_'):
             logger.warning(f"跳過演示用戶訊息: {user_id}")
             return
         
-        # 取得或創建學生記錄
-        student, created = Student.get_or_create(
-            line_user_id=user_id,
-            defaults={'name': f'學生_{user_id[-4:]}'}
-        )
+        # 確保資料庫連接 - 關鍵修復點
+        try:
+            if db.is_closed():
+                logger.warning("⚠️ 資料庫連接已關閉，嘗試重新連接...")
+                db.connect()
+                logger.info("✅ 資料庫重新連接成功")
+            
+            # 測試資料庫連接
+            db.execute_sql('SELECT 1')
+            logger.info("✅ 資料庫連接測試通過")
+            
+        except Exception as db_error:
+            logger.error(f"❌ 資料庫連接錯誤: {db_error}")
+            # 嘗試發送錯誤回應
+            try:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="System is temporarily unavailable. Please try again later. 🔧")
+                )
+            except:
+                pass
+            return
         
-        # 確保學生名稱不是演示格式
-        if student.name.startswith('[DEMO]'):
-            student.name = f'學生_{user_id[-4:]}'
-            student.save()
+        # 取得或創建學生記錄
+        try:
+            student, created = Student.get_or_create(
+                line_user_id=user_id,
+                defaults={'name': f'學生_{user_id[-4:]}'}
+            )
+            logger.info(f"👤 學生記錄: {student.name} ({'新建' if created else '既有'})")
+            
+            # 確保學生名稱不是演示格式
+            if student.name.startswith('[DEMO]'):
+                student.name = f'學生_{user_id[-4:]}'
+                student.save()
+                logger.info(f"🔄 更新學生名稱: {student.name}")
+                
+        except Exception as student_error:
+            logger.error(f"❌ 學生記錄處理錯誤: {student_error}")
+            # 使用預設學生 ID
+            student = None
         
         # 儲存訊息
-        message_record = Message.create(
-            student=student,
-            content=user_message,
-            timestamp=datetime.datetime.now(),
-            message_type='text',
-            source_type='user'  # 確保不是 'demo'
-        )
+        try:
+            message_record = Message.create(
+                student=student,
+                content=user_message,
+                timestamp=datetime.datetime.now(),
+                message_type='text',
+                source_type='user'
+            )
+            logger.info(f"💾 訊息已儲存: ID {message_record.id}")
+        except Exception as msg_error:
+            logger.error(f"❌ 訊息儲存錯誤: {msg_error}")
+            # 繼續處理，即使儲存失敗
         
-        # 取得 AI 回應
-        ai_response = get_ai_response(user_message, student.id)
+        # 取得 AI 回應 - 關鍵修復點
+        logger.info("🤖 開始生成 AI 回應...")
+        ai_response = None
+        
+        try:
+            # 檢查 Gemini AI 配置
+            if not GEMINI_API_KEY:
+                logger.error("❌ GEMINI_API_KEY 未配置")
+                ai_response = "Hello! I'm currently being set up. Please try again in a moment. 👋"
+            else:
+                ai_response = get_ai_response(user_message, student.id if student else None)
+                logger.info(f"✅ AI 回應生成成功，長度: {len(ai_response)}")
+                
+        except Exception as ai_error:
+            logger.error(f"❌ AI 回應生成失敗: {ai_error}")
+            logger.error(f"❌ AI 錯誤詳情: {type(ai_error).__name__}")
+            
+            # 提供備用回應
+            ai_response = "I'm sorry, I'm having trouble processing your message right now. Please try again in a moment. 🤖"
+        
+        # 確保有回應內容
+        if not ai_response or len(ai_response.strip()) == 0:
+            ai_response = "Hello! I received your message. How can I help you with your English learning today? 📚"
+            logger.warning("⚠️ 使用預設回應")
         
         # 更新學生統計
-        update_student_stats(student.id)
+        if student:
+            try:
+                update_student_stats(student.id)
+                logger.info("📊 學生統計已更新")
+            except Exception as stats_error:
+                logger.error(f"⚠️ 統計更新失敗: {stats_error}")
         
-        # 發送回應
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=ai_response)
-        )
-        
-        logger.info(f"處理真實學生訊息成功: {user_id} -> {user_message[:50]}")
-        
-    except Exception as e:
-        logger.error(f"處理訊息錯誤: {e}")
-        if line_bot_api:
+        # 發送回應 - 關鍵修復點
+        logger.info("📤 準備發送 LINE 回應...")
+        try:
+            # 確保回應不會太長（LINE 有字數限制）
+            if len(ai_response) > 2000:
+                ai_response = ai_response[:1900] + "... (message truncated)"
+                logger.warning("⚠️ 回應內容過長，已截斷")
+            
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="抱歉，系統暫時無法處理您的訊息，請稍後再試。")
+                TextSendMessage(text=ai_response)
             )
-
+            logger.info("✅ LINE 回應發送成功")
+            
+        except Exception as line_error:
+            logger.error(f"❌ LINE 回應發送失敗: {line_error}")
+            logger.error(f"❌ LINE 錯誤類型: {type(line_error).__name__}")
+            
+            # 嘗試發送簡化回應
+            try:
+                simple_response = "Hello! I received your message. 👋"
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=simple_response)
+                )
+                logger.info("✅ 簡化回應發送成功")
+            except Exception as final_error:
+                logger.error(f"💥 所有回應嘗試都失敗: {final_error}")
+                # 記錄完整錯誤資訊
+                import traceback
+                logger.error(f"💥 完整錯誤追蹤: {traceback.format_exc()}")
+        
+        logger.info(f"🎉 訊息處理完成: {user_id}")
+        
+    except Exception as e:
+        logger.error(f"💥 處理訊息時發生嚴重錯誤: {str(e)}")
+        logger.error(f"💥 錯誤類型: {type(e).__name__}")
+        
+        # 記錄完整錯誤追蹤
+        import traceback
+        logger.error(f"💥 完整錯誤追蹤: {traceback.format_exc()}")
+        
+        # 最後的緊急回應
+        try:
+            if line_bot_api and hasattr(event, 'reply_token'):
+                emergency_response = "System error. Please try again. 🔧"
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=emergency_response)
+                )
+                logger.info("🚨 緊急回應已發送")
+        except:
+            logger.error("💥 連緊急回應都無法發送")
+            
 # =================== 健康檢查和狀態路由 ===================
 
 @app.route('/health')
