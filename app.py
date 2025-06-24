@@ -39,15 +39,10 @@ except ImportError as e:
     logging.error(f"❌ Failed to load improved analytics module: {e}")
 
 # 導入 Web 管理後台模板
-# Emergency template import fix
-import logging
-
 try:
-    # Try the simplest approach first
     from templates_utils import get_template, ERROR_TEMPLATE, HEALTH_TEMPLATE
     from templates_main import INDEX_TEMPLATE, STUDENTS_TEMPLATE, STUDENT_DETAIL_TEMPLATE
     
-    # Try analysis templates individually
     try:
         from templates_analysis_part1 import TEACHING_INSIGHTS_TEMPLATE
     except ImportError:
@@ -109,6 +104,7 @@ else:
 
 # 資料庫初始化
 initialize_db()
+
 # =================== 資料庫連接管理 ===================
 
 def ensure_db_connection():
@@ -179,6 +175,7 @@ def initialize_db_with_retry(max_retries=3):
     
     logger.error("💥 資料庫初始化完全失敗")
     return False
+
 # =================== 資料庫清理功能 ===================
 
 class DatabaseCleaner:
@@ -392,140 +389,395 @@ def index():
             }
         )
 
-@app.route('/teaching-insights')
-def teaching_insights():
-    """教師分析後台 - 使用改進的真實資料分析"""
+# =================== 管理員功能路由 ===================
+
+@app.route('/admin')
+def admin_dashboard():
+    """管理員儀表板"""
     try:
-        if IMPROVED_ANALYTICS_AVAILABLE:
-            insights_data = get_improved_teaching_insights()
-            
-            # 檢查是否有真實資料
-            if not insights_data.get('has_real_data', False):
-                # 顯示等待狀態頁面
-                return render_template_string(
-                    TEACHING_INSIGHTS_TEMPLATE,
-                    category_stats={'total_questions': 0},
-                    engagement_analysis={'total_real_students': 0, 'status': 'waiting_for_data'},
-                    students=[],
-                    stats=insights_data['stats'],
-                    real_data_info={'has_real_data': False},
-                    current_time=datetime.datetime.now()
-                )
-            
-            return render_template_string(
-                TEACHING_INSIGHTS_TEMPLATE,
-                category_stats=insights_data['category_stats'],
-                engagement_analysis=insights_data['engagement_analysis'],
-                students=insights_data['students'],
-                stats=insights_data['stats'],
-                real_data_info=insights_data,
-                current_time=datetime.datetime.now()
-            )
-        else:
-            # 基本的真實資料檢查
-            data_status = db_cleaner.get_real_data_status()
-            if not data_status['has_real_data']:
-                return f"""
-                <div style="font-family: sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
-                    <h1>📊 教師分析後台</h1>
-                    <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 30px; margin: 30px 0; border-radius: 10px;">
-                        <h3>⏳ 等待真實學生資料</h3>
-                        <p>目前有 <strong>{data_status['real_students']}</strong> 位真實學生，<strong>{data_status['real_messages']}</strong> 則真實對話</p>
-                        <p>當學生開始使用 LINE Bot 對話時，分析功能將自動啟用</p>
-                        <div style="margin-top: 20px;">
-                            <a href="/" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">返回首頁</a>
-                            <a href="/admin/cleanup" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-left: 10px;">清理演示資料</a>
-                        </div>
+        data_status = db_cleaner.get_real_data_status()
+        
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>🔧 系統管理儀表板 - EMI 智能教學助理</title>
+            <style>
+                body {{ font-family: sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; padding: 20px; min-height: 100vh; }}
+                .container {{ max-width: 1000px; margin: 0 auto; background: white; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); overflow: hidden; }}
+                .header {{ background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%); color: white; padding: 30px; text-align: center; }}
+                .header h1 {{ margin: 0; font-size: 2.5em; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }}
+                .admin-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; padding: 30px; }}
+                .admin-card {{ background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 10px; padding: 25px; text-align: center; transition: all 0.3s ease; }}
+                .admin-card:hover {{ transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }}
+                .admin-card.primary {{ border-color: #007bff; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); }}
+                .admin-card.success {{ border-color: #28a745; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); }}
+                .admin-card.warning {{ border-color: #ffc107; background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%); }}
+                .admin-card.danger {{ border-color: #dc3545; background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%); }}
+                .card-icon {{ font-size: 3em; margin-bottom: 15px; }}
+                .card-title {{ font-size: 1.3em; font-weight: bold; margin-bottom: 10px; color: #2c3e50; }}
+                .card-description {{ color: #666; margin-bottom: 20px; line-height: 1.5; }}
+                .card-button {{ background: #007bff; color: white; padding: 12px 25px; text-decoration: none; border-radius: 25px; display: inline-block; transition: all 0.3s ease; }}
+                .card-button:hover {{ background: #0056b3; transform: scale(1.05); }}
+                .status-bar {{ background: #f8f9fa; padding: 20px; border-bottom: 1px solid #dee2e6; }}
+                .status-item {{ display: inline-block; margin: 0 20px; }}
+                .status-number {{ font-size: 1.5em; font-weight: bold; color: #2c3e50; }}
+                .status-label {{ color: #666; font-size: 0.9em; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔧 系統管理儀表板</h1>
+                    <p>EMI 智能教學助理 - 管理員控制台</p>
+                </div>
+                
+                <div class="status-bar">
+                    <div class="status-item">
+                        <div class="status-number">{data_status['real_students']}</div>
+                        <div class="status-label">真實學生</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-number">{data_status['real_messages']}</div>
+                        <div class="status-label">真實訊息</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-number">{'✅' if data_status['has_real_data'] else '⏳'}</div>
+                        <div class="status-label">系統狀態</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-number">{'🟢' if line_bot_api else '🔴'}</div>
+                        <div class="status-label">LINE Bot</div>
                     </div>
                 </div>
-                """
-            
-            return f"""
-            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-                <h1>❌ 改進分析模組未載入</h1>
-                <p>教師分析後台需要改進的真實資料分析模組</p>
-                <a href="/" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回首頁</a>
+                
+                <div class="admin-grid">
+                    <div class="admin-card primary">
+                        <div class="card-icon">👥</div>
+                        <div class="card-title">更新學生暱稱</div>
+                        <div class="card-description">
+                            自動獲取並更新所有學生的 LINE 真實暱稱，讓系統顯示如 "York" 等真實名稱而不是自動生成的 ID
+                        </div>
+                        <a href="/admin/update-line-names" class="card-button">🔄 立即更新暱稱</a>
+                    </div>
+                    
+                    <div class="admin-card success">
+                        <div class="card-icon">🏥</div>
+                        <div class="card-title">系統健康檢查</div>
+                        <div class="card-description">
+                            檢查資料庫連接、LINE Bot 配置、AI 服務狀態等系統核心功能是否正常運作
+                        </div>
+                        <a href="/health" class="card-button">🔍 健康檢查</a>
+                    </div>
+                    
+                    <div class="admin-card warning">
+                        <div class="card-icon">📊</div>
+                        <div class="card-title">學生管理</div>
+                        <div class="card-description">
+                            查看和管理所有學生帳號，檢視學習進度和參與統計
+                        </div>
+                        <a href="/students" class="card-button">👥 學生列表</a>
+                    </div>
+                    
+                    <div class="admin-card danger">
+                        <div class="card-icon">🧹</div>
+                        <div class="card-title">資料庫清理</div>
+                        <div class="card-description">
+                            清理演示資料以確保分析結果的準確性
+                        </div>
+                        <a href="/admin/cleanup" class="card-button">🗑️ 清理演示資料</a>
+                    </div>
+                </div>
+                
+                <div style="text-align: center; padding: 30px;">
+                    <a href="/" style="background: #6c757d; color: white; padding: 12px 25px; text-decoration: none; border-radius: 25px;">🏠 返回首頁</a>
+                </div>
             </div>
-            """
-            
+        </body>
+        </html>
+        """
+        
     except Exception as e:
-        logger.error(f"Teaching insights error: {e}")
         return f"""
         <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-            <h1>❌ 教師分析後台載入失敗</h1>
+            <h1>❌ 管理儀表板載入失敗</h1>
             <p>錯誤: {str(e)}</p>
+            <a href="/" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回首頁</a>
+        </div>
+        """, 500
+
+@app.route('/admin/update-line-names')
+def update_line_names():
+    """批量更新現有學生的 LINE 暱稱"""
+    try:
+        if not line_bot_api:
+            return """
+            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+                <h1>❌ LINE Bot API 未配置</h1>
+                <p>無法更新學生暱稱，請檢查 LINE Bot 配置</p>
+                <a href="/admin" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回管理後台</a>
+            </div>
+            """
+        
+        updated_count = 0
+        failed_count = 0
+        update_details = []
+        
+        # 找到所有需要更新的學生（真實學生但名稱是自動生成的）
+        students = Student.select().where(
+            (Student.name.startswith('學生_') | 
+             Student.name.startswith('LINE用戶_') | 
+             Student.name.startswith('用戶_')) &
+            (~Student.line_user_id.startswith('demo_'))
+        )
+        
+        for student in students:
+            try:
+                # 獲取 LINE 用戶資料
+                profile = line_bot_api.get_profile(student.line_user_id)
+                old_name = student.name
+                new_name = profile.display_name or f"用戶_{student.line_user_id[-6:]}"
+                
+                student.name = new_name
+                student.save()
+                
+                update_details.append(f"{old_name} → {new_name}")
+                logger.info(f"✅ 更新成功: {old_name} -> {new_name}")
+                updated_count += 1
+                
+            except LineBotApiError as e:
+                logger.warning(f"⚠️ LINE API 錯誤，更新失敗 {student.line_user_id}: {e}")
+                failed_count += 1
+            except Exception as e:
+                logger.warning(f"⚠️ 更新失敗 {student.line_user_id}: {e}")
+                failed_count += 1
+        
+        # 生成結果頁面
+        details_html = ""
+        if update_details:
+            details_html = f"""
+            <div style="background: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; border-radius: 5px; margin: 20px 0; max-height: 300px; overflow-y: auto;">
+                <h4>更新詳情：</h4>
+                <ul style="text-align: left; margin: 0; padding-left: 20px;">
+                    {"".join([f"<li>{detail}</li>" for detail in update_details[:20]])}
+                    {f"<li><em>... 還有 {len(update_details) - 20} 個更新</em></li>" if len(update_details) > 20 else ""}
+                </ul>
+            </div>
+            """
+        
+        return f"""
+        <div style="font-family: sans-serif; padding: 20px; text-align: center;">
+            <h1>✅ LINE 暱稱更新完成</h1>
+            <div style="background: #e8f5e8; border: 1px solid #4caf50; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3>更新結果</h3>
+                <p><strong>成功更新：</strong>{updated_count} 個學生</p>
+                <p><strong>更新失敗：</strong>{failed_count} 個學生</p>
+                {f"<p><em>失敗原因：可能是 LINE API 權限問題或用戶已刪除 Bot</em></p>" if failed_count > 0 else ""}
+            </div>
+            {details_html}
             <div style="margin-top: 20px;">
-                <a href="/health" style="padding: 10px 20px; background: #17a2b8; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏥 系統健康檢查</a>
-                <a href="/" style="padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏠 返回首頁</a>
+                <a href="/students" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">查看學生列表</a>
+                <a href="/admin" style="padding: 10px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">返回管理後台</a>
             </div>
         </div>
-        """, 500
-
-@app.route('/conversation-summaries')
-def conversation_summaries():
-    """對話摘要頁面"""
-    try:
-        if IMPROVED_ANALYTICS_AVAILABLE:
-            summaries_data = get_improved_conversation_summaries()
-            
-            return render_template_string(
-                CONVERSATION_SUMMARIES_TEMPLATE,
-                summaries=summaries_data['summaries'],
-                insights=summaries_data['insights'],
-                real_data_message=summaries_data.get('message', ''),
-                current_time=datetime.datetime.now()
-            )
-        else:
-            return f"""
-            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-                <h1>❌ 改進分析模組未載入</h1>
-                <p>對話摘要需要改進的真實資料分析模組</p>
-                <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
-            </div>
-            """
-            
+        """
+        
     except Exception as e:
-        logger.error(f"Conversation summaries error: {e}")
         return f"""
         <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-            <h1>❌ 對話摘要載入失敗</h1>
-            <p>錯誤: {str(e)}</p>
-            <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
-        </div>
-        """, 500
-
-@app.route('/learning-recommendations')
-def learning_recommendations():
-    """學習建議頁面"""
-    try:
-        if IMPROVED_ANALYTICS_AVAILABLE:
-            recommendations_data = get_improved_student_recommendations()
-            
-            return render_template_string(
-                LEARNING_RECOMMENDATIONS_TEMPLATE,
-                recommendations=recommendations_data['recommendations'],
-                overview=recommendations_data['overview'],
-                real_data_message=recommendations_data.get('message', ''),
-                current_time=datetime.datetime.now()
-            )
-        else:
-            return f"""
-            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-                <h1>❌ 改進分析模組未載入</h1>
-                <p>學習建議需要改進的真實資料分析模組</p>
-                <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
+            <h1>❌ 更新失敗</h1>
+            <div style="background: #ffebee; border: 1px solid #f44336; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3>錯誤詳情</h3>
+                <p>{str(e)}</p>
             </div>
-            """
-            
-    except Exception as e:
-        logger.error(f"Learning recommendations error: {e}")
-        return f"""
-        <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-            <h1>❌ 學習建議載入失敗</h1>
-            <p>錯誤: {str(e)}</p>
-            <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
+            <a href="/admin" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回管理後台</a>
         </div>
-        """, 500
+        """
+
+# =================== LINE Bot Webhook ===================
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    """LINE Bot webhook 處理"""
+    if not line_bot_api or not handler:
+        abort(400)
+    
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    app.logger.info("Request body: " + body)
+    
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        app.logger.error("Invalid signature")
+        abort(400)
+    
+    return 'OK'
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    """處理 LINE 訊息 - 修復版本（支援暱稱獲取）"""
+    if not line_bot_api:
+        logger.error("❌ LINE Bot API 未初始化")
+        return
+    
+    try:
+        user_id = event.source.user_id
+        user_message = event.message.text
+        logger.info(f"🔍 收到訊息: {user_id} -> {user_message[:50]}")
+        
+        # 確保不是演示用戶
+        if user_id.startswith('demo_'):
+            logger.warning(f"跳過演示用戶訊息: {user_id}")
+            return
+        
+        # 確保資料庫連接
+        try:
+            if db.is_closed():
+                logger.warning("⚠️ 資料庫連接已關閉，嘗試重新連接...")
+                db.connect()
+                logger.info("✅ 資料庫重新連接成功")
+            
+            db.execute_sql('SELECT 1')
+            logger.info("✅ 資料庫連接測試通過")
+            
+        except Exception as db_error:
+            logger.error(f"❌ 資料庫連接錯誤: {db_error}")
+            try:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="System is temporarily unavailable. Please try again later. 🔧")
+                )
+            except:
+                pass
+            return
+        
+        # 🔧 關鍵修復：取得或創建學生記錄（包含 LINE 暱稱獲取）
+        student = None
+        try:
+            student, created = Student.get_or_create(
+                line_user_id=user_id,
+                defaults={'name': f'學生_{user_id[-4:]}'}  # 臨時名稱
+            )
+            
+            # 如果是新學生或需要更新暱稱，獲取 LINE 用戶資料
+            if created or student.name.startswith('學生_') or student.name.startswith('LINE用戶_'):
+                try:
+                    # ✅ 關鍵修復：獲取 LINE 用戶資料
+                    profile = line_bot_api.get_profile(user_id)
+                    display_name = profile.display_name or f"用戶_{user_id[-4:]}"
+                    
+                    # 更新學生名稱為真實暱稱
+                    old_name = student.name
+                    student.name = display_name
+                    student.save()
+                    
+                    logger.info(f"✅ 成功獲取用戶暱稱: {old_name} -> {display_name}")
+                    
+                except LineBotApiError as profile_error:
+                    logger.warning(f"⚠️ LINE API 錯誤，無法獲取用戶資料: {profile_error}")
+                    # 如果無法獲取暱稱，使用較友善的備用名稱
+                    if student.name.startswith('學生_'):
+                        student.name = f"用戶_{user_id[-6:]}"
+                        student.save()
+                except Exception as profile_error:
+                    logger.warning(f"⚠️ 無法獲取用戶資料: {profile_error}")
+                    # 如果無法獲取暱稱，保持原名稱或使用備用名稱
+                    if student.name.startswith('學生_'):
+                        student.name = f"用戶_{user_id[-6:]}"
+                        student.save()
+            
+            logger.info(f"👤 學生記錄: {student.name} ({'新建' if created else '既有'})")
+            
+            # 確保學生名稱不是演示格式
+            if student.name.startswith('[DEMO]'):
+                student.name = f'用戶_{user_id[-4:]}'
+                student.save()
+                logger.info(f"🔄 清理演示名稱: {student.name}")
+                
+        except Exception as student_error:
+            logger.error(f"❌ 學生記錄處理錯誤: {student_error}")
+            student = None
+
+        # 儲存訊息
+        try:
+            if student:
+                message_record = Message.create(
+                    student=student,
+                    content=user_message,
+                    timestamp=datetime.datetime.now(),
+                    message_type='text',
+                    source_type='user'
+                )
+                logger.info(f"💾 訊息已儲存: ID {message_record.id}")
+        except Exception as msg_error:
+            logger.error(f"❌ 訊息儲存錯誤: {msg_error}")
+        
+        # 取得 AI 回應
+        logger.info("🤖 開始生成 AI 回應...")
+        ai_response = None
+        
+        try:
+            if not GEMINI_API_KEY:
+                logger.error("❌ GEMINI_API_KEY 未配置")
+                ai_response = "Hello! I'm currently being set up. Please try again in a moment. 👋"
+            else:
+                ai_response = get_ai_response(student.id if student else None, user_message)
+                logger.info(f"✅ AI 回應生成成功，長度: {len(ai_response)}")
+                
+        except Exception as ai_error:
+            logger.error(f"❌ AI 回應生成失敗: {ai_error}")
+            ai_response = "I'm sorry, I'm having trouble processing your message right now. Please try again in a moment. 🤖"
+        
+        # 確保有回應內容
+        if not ai_response or len(ai_response.strip()) == 0:
+            ai_response = "Hello! I received your message. How can I help you with your English learning today? 📚"
+            logger.warning("⚠️ 使用預設回應")
+        
+        # 更新學生統計
+        if student:
+            try:
+                student.last_active = datetime.datetime.now()
+                student.message_count += 1
+                student.save()
+                logger.info("📊 學生統計已更新")
+            except Exception as stats_error:
+                logger.error(f"⚠️ 統計更新失敗: {stats_error}")
+        
+        # 發送回應
+        logger.info("📤 準備發送 LINE 回應...")
+        try:
+            if len(ai_response) > 2000:
+                ai_response = ai_response[:1900] + "... (message truncated)"
+                logger.warning("⚠️ 回應內容過長，已截斷")
+            
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=ai_response)
+            )
+            logger.info("✅ LINE 回應發送成功")
+            
+        except Exception as line_error:
+            logger.error(f"❌ LINE 回應發送失敗: {line_error}")
+        
+        logger.info(f"🎉 訊息處理完成: {user_id} ({student.name if student else 'Unknown'})")
+        
+    except Exception as e:
+        logger.error(f"💥 處理訊息時發生嚴重錯誤: {str(e)}")
+        
+        try:
+            if line_bot_api and hasattr(event, 'reply_token'):
+                emergency_response = "System error. Please try again. 🔧"
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=emergency_response)
+                )
+                logger.info("🚨 緊急回應已發送")
+        except:
+            logger.error("💥 連緊急回應都無法發送")
+
+# =================== 其他路由 ===================
 
 @app.route('/students')
 def students():
@@ -590,607 +842,12 @@ def student_detail(student_id):
         </div>
         """, 500
 
-@app.route('/storage-management')
-def storage_management():
-    """儲存管理頁面"""
-    try:
-        if IMPROVED_ANALYTICS_AVAILABLE:
-            storage_info = get_improved_storage_management()
-            return render_template_string(
-                STORAGE_MANAGEMENT_TEMPLATE,
-                storage_stats=storage_info,
-                real_data_info=storage_info
-            )
-        else:
-            return f"""
-            <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-                <h1>❌ 改進分析模組未載入</h1>
-                <p>儲存管理需要改進的真實資料分析模組</p>
-                <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
-            </div>
-            """
-    except Exception as e:
-        logger.error(f"Storage management error: {e}")
-        return f"""
-        <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-            <h1>❌ 儲存管理載入失敗</h1>
-            <p>錯誤: {str(e)}</p>
-            <a href="/teaching-insights" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回分析後台</a>
-        </div>
-        """, 500
-
-# =================== 管理員功能路由 ===================
-
-@app.route('/admin/cleanup')
-def admin_cleanup_page():
-    """管理員清理頁面"""
-    try:
-        data_status = db_cleaner.get_real_data_status()
-        
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>🧹 資料庫清理 - EMI 管理後台</title>
-            <style>
-                body {{ font-family: sans-serif; background: #f8f9fa; margin: 0; padding: 20px; }}
-                .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                .status-card {{ background: #e3f2fd; border: 1px solid #2196f3; padding: 20px; border-radius: 8px; margin: 20px 0; }}
-                .danger-zone {{ background: #ffebee; border: 1px solid #f44336; padding: 20px; border-radius: 8px; margin: 20px 0; }}
-                .btn {{ padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; margin: 5px; }}
-                .btn-danger {{ background: #f44336; color: white; }}
-                .btn-primary {{ background: #2196f3; color: white; }}
-                .btn-success {{ background: #4caf50; color: white; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>🧹 資料庫清理管理</h1>
-                
-                <div class="status-card">
-                    <h3>📊 當前資料狀態</h3>
-                    <p><strong>真實學生:</strong> {data_status['real_students']} 位</p>
-                    <p><strong>真實訊息:</strong> {data_status['real_messages']} 則</p>
-                    <p><strong>演示學生:</strong> {data_status['demo_students']} 位</p>
-                    <p><strong>演示訊息:</strong> {data_status['demo_messages']} 則</p>
-                </div>
-                
-                {'<div class="danger-zone"><h3>⚠️ 發現演示資料</h3><p>資料庫中仍有演示資料，建議清理以確保分析結果的準確性。</p></div>' if data_status['has_demo_data'] else '<div style="background: #e8f5e8; border: 1px solid #4caf50; padding: 20px; border-radius: 8px; margin: 20px 0;"><h3>✅ 資料庫已清潔</h3><p>沒有發現演示資料，資料庫處於純淨狀態。</p></div>'}
-                
-                <div style="text-align: center; margin-top: 30px;">
-                    <a href="/admin/cleanup/execute" class="btn btn-danger" onclick="return confirm('確定要清理所有演示資料嗎？此操作無法復原！')">
-                        🗑️ 清理演示資料
-                    </a>
-                    <a href="/admin/data-status" class="btn btn-primary">
-                        📊 查看詳細狀態
-                    </a>
-                    <a href="/" class="btn btn-success">
-                        🏠 返回首頁
-                    </a>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-    except Exception as e:
-        return f"清理頁面載入錯誤: {str(e)}", 500
-
-@app.route('/admin/cleanup/execute')
-def admin_cleanup_execute():
-    """執行清理操作"""
-    try:
-        result = db_cleaner.clean_demo_data()
-        
-        if result['success']:
-            return f"""
-            <div style="font-family: sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
-                <h1>✅ 清理完成</h1>
-                <div style="background: #e8f5e8; border: 1px solid #4caf50; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h3>清理結果</h3>
-                    <p>{result['message']}</p>
-                    <ul style="text-align: left; display: inline-block;">
-                        <li>刪除學生: {result['stats']['students_deleted']} 位</li>
-                        <li>刪除訊息: {result['stats']['messages_deleted']} 則</li>
-                        <li>刪除分析: {result['stats']['analyses_deleted']} 個</li>
-                        <li>刪除AI回應: {result['stats']['ai_responses_deleted']} 個</li>
-                    </ul>
-                </div>
-                <div style="margin-top: 30px;">
-                    <a href="/" style="background: #4caf50; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; margin: 5px;">🏠 返回首頁</a>
-                    <a href="/health" style="background: #2196f3; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; margin: 5px;">🔧 檢查系統狀態</a>
-                </div>
-            </div>
-            """
-        else:
-            return f"""
-            <div style="font-family: sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
-                <h1>❌ 清理失敗</h1>
-                <div style="background: #ffebee; border: 1px solid #f44336; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h3>錯誤詳情</h3>
-                    <p>{result['message']}</p>
-                </div>
-                <div style="margin-top: 30px;">
-                    <a href="/admin/cleanup" style="background: #f44336; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; margin: 5px;">🔄 重試清理</a>
-                    <a href="/" style="background: #2196f3; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; margin: 5px;">🏠 返回首頁</a>
-                </div>
-            </div>
-            """
-    except Exception as e:
-        logger.error(f"執行清理錯誤: {e}")
-        return f"清理執行錯誤: {str(e)}", 500
-
-@app.route('/admin/data-status')
-def admin_data_status():
-    """資料狀態詳情"""
-    try:
-        data_status = db_cleaner.get_real_data_status()
-        
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>📊 資料狀態 - EMI 管理後台</title>
-            <style>
-                body {{ font-family: sans-serif; background: #f8f9fa; margin: 0; padding: 20px; }}
-                .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }}
-                .status-card {{ background: #f8f9fa; border: 1px solid #dee2e6; padding: 20px; border-radius: 8px; text-align: center; }}
-                .status-number {{ font-size: 2em; font-weight: bold; color: #2196f3; }}
-                .status-label {{ color: #666; margin-top: 5px; }}
-                .real-data {{ border-left: 4px solid #4caf50; }}
-                .demo-data {{ border-left: 4px solid #f44336; }}
-                .btn {{ padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; margin: 5px; }}
-                .btn-primary {{ background: #2196f3; color: white; }}
-                .btn-success {{ background: #4caf50; color: white; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>📊 資料庫狀態詳情</h1>
-                
-                <h3>🎯 真實資料統計</h3>
-                <div class="status-grid">
-                    <div class="status-card real-data">
-                        <div class="status-number">{data_status['real_students']}</div>
-                        <div class="status-label">真實學生</div>
-                    </div>
-                    <div class="status-card real-data">
-                        <div class="status-number">{data_status['real_messages']}</div>
-                        <div class="status-label">真實訊息</div>
-                    </div>
-                </div>
-                
-                <h3>🧹 演示資料統計</h3>
-                <div class="status-grid">
-                    <div class="status-card demo-data">
-                        <div class="status-number">{data_status['demo_students']}</div>
-                        <div class="status-label">演示學生</div>
-                    </div>
-                    <div class="status-card demo-data">
-                        <div class="status-number">{data_status['demo_messages']}</div>
-                        <div class="status-label">演示訊息</div>
-                    </div>
-                </div>
-                
-                <h3>🎯 系統狀態</h3>
-                <div style="background: {'#e8f5e8' if data_status['has_real_data'] else '#fff3cd'}; border: 1px solid {'#4caf50' if data_status['has_real_data'] else '#ffc107'}; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <p><strong>資料可用性:</strong> {'✅ 有真實資料可供分析' if data_status['has_real_data'] else '⏳ 等待真實學生開始使用'}</p>
-                    <p><strong>清理需求:</strong> {'⚠️ 建議清理演示資料' if data_status['has_demo_data'] else '✅ 資料庫已清潔'}</p>
-                </div>
-                
-                <div style="text-align: center; margin-top: 30px;">
-                    <a href="/admin/cleanup" class="btn btn-primary">🧹 資料清理</a>
-                    <a href="/" class="btn btn-success">🏠 返回首頁</a>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-    except Exception as e:
-        return f"狀態頁面載入錯誤: {str(e)}", 500
-
-# =================== API 路由 ===================
-
-@app.route('/api/dashboard-stats')
-def dashboard_stats_api():
-    """儀表板統計 API - 支援真實資料檢測"""
-    try:
-        if IMPROVED_ANALYTICS_AVAILABLE:
-            insights_data = get_improved_teaching_insights()
-            return jsonify({
-                'success': True,
-                'stats': insights_data['stats'],
-                'has_real_data': insights_data.get('has_real_data', False),
-                'last_updated': insights_data.get('timestamp'),
-                'data_source': 'improved_real_analytics'
-            })
-        else:
-            data_status = db_cleaner.get_real_data_status()
-            return jsonify({
-                'success': True,
-                'stats': {
-                    'total_students': data_status['real_students'],
-                    'real_students': data_status['real_students'],
-                    'total_messages': data_status['real_messages'],
-                    'avg_participation': 0
-                },
-                'has_real_data': data_status['has_real_data'],
-                'data_source': 'basic_real_data_check'
-            })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'has_real_data': False
-        }), 500
-
-@app.route('/api/student-analysis/<int:student_id>')
-def student_analysis_api(student_id):
-    """學生分析 API - 只分析真實學生"""
-    try:
-        student = Student.get_by_id(student_id)
-        
-        # 確保不是演示學生
-        if student.name.startswith('[DEMO]') or student.line_user_id.startswith('demo_'):
-            return jsonify({
-                'success': False, 
-                'error': 'Demo student analysis not available'
-            }), 403
-        
-        analysis = analyze_student_patterns(student_id)
-        return jsonify({'success': True, 'analysis': analysis})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/class-statistics')
-def class_statistics_api():
-    """班級統計 API - 只統計真實學生"""
-    try:
-        data_status = db_cleaner.get_real_data_status()
-        
-        stats = {
-            'total_students': data_status['real_students'],
-            'total_messages': data_status['real_messages'],
-            'active_students_today': 0,  # 可以加入更詳細的計算
-            'avg_messages_per_student': 0,
-            'common_question_types': ['文法', '詞彙', '發音']
-        }
-        
-        if stats['total_students'] > 0:
-            stats['avg_messages_per_student'] = stats['total_messages'] / stats['total_students']
-        
-        return jsonify({'success': True, 'stats': stats})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/cleanup/status')
-def cleanup_status_api():
-    """清理狀態 API"""
-    try:
-        data_status = db_cleaner.get_real_data_status()
-        return jsonify({
-            'success': True,
-            'data_status': data_status
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/cleanup/execute', methods=['POST'])
-def cleanup_execute_api():
-    """執行清理 API"""
-    try:
-        result = db_cleaner.clean_demo_data()
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-# =================== 匯出相關 API 路由 ===================
-
-@app.route('/api/export/<export_type>')
-def export_data_api(export_type):
-    """資料匯出 API - 只匯出真實資料"""
-    try:
-        export_format = request.args.get('format', 'json')
-        date_range = request.args.get('date_range', None)
-        
-        # 只匯出真實學生資料
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'{export_type}_real_data_{timestamp}.{export_format}'
-        
-        # 收集真實資料
-        real_students = list(Student.select().where(
-            (~Student.name.startswith('[DEMO]')) &
-            (~Student.line_user_id.startswith('demo_'))
-        ))
-        
-        real_messages = list(Message.select().join(Student).where(
-            (~Student.name.startswith('[DEMO]')) &
-            (~Student.line_user_id.startswith('demo_')) &
-            (Message.source_type != 'demo')
-        ))
-        
-        export_data = {
-            'export_info': {
-                'type': export_type,
-                'timestamp': timestamp,
-                'format': export_format,
-                'real_data_only': True
-            },
-            'students': len(real_students),
-            'messages': len(real_messages),
-            'data': f'Real data export for {export_type}'
-        }
-        
-        if export_format == 'json':
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, ensure_ascii=False, indent=2)
-        
-        file_size = os.path.getsize(filename) if os.path.exists(filename) else 0
-        
-        return jsonify({
-            'success': True,
-            'download_url': f"/download/{filename}",
-            'filename': filename,
-            'size': file_size,
-            'export_type': export_type,
-            'format': export_format,
-            'real_data_only': True
-        })
-        
-    except Exception as e:
-        app.logger.error(f"匯出API錯誤: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/download/<filename>')
-def download_file(filename):
-    """檔案下載端點"""
-    try:
-        if not os.path.exists(filename) or '..' in filename:
-            return "File not found", 404
-        
-        return send_file(filename, as_attachment=True)
-        
-    except Exception as e:
-        app.logger.error(f"檔案下載錯誤: {e}")
-        return "Download failed", 500
-
-# =================== LINE Bot Webhook ===================
-
-@app.route("/callback", methods=['POST'])
-def callback():
-    """LINE Bot webhook 處理"""
-    if not line_bot_api or not handler:
-        abort(400)
-    
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
-    app.logger.info("Request body: " + body)
-    
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        app.logger.error("Invalid signature")
-        abort(400)
-    
-    return 'OK'
-
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    """處理 LINE 訊息 - 增強版錯誤處理"""
-    if not line_bot_api:
-        logger.error("❌ LINE Bot API 未初始化")
-        return
-    
-    try:
-        user_id = event.source.user_id
-        user_message = event.message.text
-        logger.info(f"🔍 收到訊息: {user_id} -> {user_message[:50]}")
-        
-        # 確保不是演示用戶
-        if user_id.startswith('demo_'):
-            logger.warning(f"跳過演示用戶訊息: {user_id}")
-            return
-        
-        # 確保資料庫連接 - 關鍵修復點
-        try:
-            if db.is_closed():
-                logger.warning("⚠️ 資料庫連接已關閉，嘗試重新連接...")
-                db.connect()
-                logger.info("✅ 資料庫重新連接成功")
-            
-            # 測試資料庫連接
-            db.execute_sql('SELECT 1')
-            logger.info("✅ 資料庫連接測試通過")
-            
-        except Exception as db_error:
-            logger.error(f"❌ 資料庫連接錯誤: {db_error}")
-            # 嘗試發送錯誤回應
-            try:
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text="System is temporarily unavailable. Please try again later. 🔧")
-                )
-            except:
-                pass
-            return
-        
-        # 取得或創建學生記錄
-        
-        try:
-            student, created = Student.get_or_create(
-                line_user_id=user_id,
-                defaults={'name': f'LINE用戶_{user_id}'}
-            )
-            logger.info(f"👤 學生記錄: {student.name} ({'新建' if created else '既有'})")
-            
-            # 確保學生名稱不是演示格式
-            if student.name.startswith('[DEMO]'):
-                student.name = f'學生_{user_id[-4:]}'
-                student.save()
-                logger.info(f"🔄 更新學生名稱: {student.name}")
-                
-        except Exception as student_error:
-            logger.error(f"❌ 學生記錄處理錯誤: {student_error}")
-            # 使用預設學生 ID
-            student = None
-
-try:
-    student, created = Student.get_or_create(
-        line_user_id=user_id,
-        defaults={'name': f'學生_{user_id[-4:]}'}  # 臨時名稱
-    )
-    
-    # 如果是新學生或需要更新暱稱，獲取 LINE 用戶資料
-    if created or student.name.startswith('學生_') or student.name.startswith('LINE用戶_'):
-        try:
-            # ✅ 關鍵修復：獲取 LINE 用戶資料
-            profile = line_bot_api.get_profile(user_id)
-            display_name = profile.display_name or f"用戶_{user_id[-4:]}"
-            
-            # 更新學生名稱為真實暱稱
-            old_name = student.name
-            student.name = display_name
-            student.save()
-            
-            logger.info(f"✅ 成功獲取用戶暱稱: {old_name} -> {display_name}")
-            
-        except LineBotApiError as profile_error:
-            logger.warning(f"⚠️ LINE API 錯誤，無法獲取用戶資料: {profile_error}")
-            # 如果無法獲取暱稱，使用較友善的備用名稱
-            if student.name.startswith('學生_'):
-                student.name = f"用戶_{user_id[-6:]}"
-                student.save()
-        except Exception as profile_error:
-            logger.warning(f"⚠️ 無法獲取用戶資料: {profile_error}")
-            # 如果無法獲取暱稱，保持原名稱或使用備用名稱
-            if student.name.startswith('學生_'):
-                student.name = f"用戶_{user_id[-6:]}"
-                student.save()
-    
-    logger.info(f"👤 學生記錄: {student.name} ({'新建' if created else '既有'})")
-    
-    # 確保學生名稱不是演示格式
-    if student.name.startswith('[DEMO]'):
-        student.name = f'用戶_{user_id[-4:]}'
-        student.save()
-        logger.info(f"🔄 清理演示名稱: {student.name}")
-        
-except Exception as student_error:
-    logger.error(f"❌ 學生記錄處理錯誤: {student_error}")
-    # 使用預設學生 ID
-    student = None
-
-
-        # 儲存訊息
-        try:
-            message_record = Message.create(
-                student=student,
-                content=user_message,
-                timestamp=datetime.datetime.now(),
-                message_type='text',
-                source_type='user'
-            )
-            logger.info(f"💾 訊息已儲存: ID {message_record.id}")
-        except Exception as msg_error:
-            logger.error(f"❌ 訊息儲存錯誤: {msg_error}")
-            # 繼續處理，即使儲存失敗
-        
-        # 取得 AI 回應 - 關鍵修復點
-        logger.info("🤖 開始生成 AI 回應...")
-        ai_response = None
-        
-        try:
-            # 檢查 Gemini AI 配置
-            if not GEMINI_API_KEY:
-                logger.error("❌ GEMINI_API_KEY 未配置")
-                ai_response = "Hello! I'm currently being set up. Please try again in a moment. 👋"
-            else:
-                ai_response = get_ai_response(student.id if student else None, user_message)
-                logger.info(f"✅ AI 回應生成成功，長度: {len(ai_response)}")
-                
-        except Exception as ai_error:
-            logger.error(f"❌ AI 回應生成失敗: {ai_error}")
-            logger.error(f"❌ AI 錯誤詳情: {type(ai_error).__name__}")
-            
-            # 提供備用回應
-            ai_response = "I'm sorry, I'm having trouble processing your message right now. Please try again in a moment. 🤖"
-        
-        # 確保有回應內容
-        if not ai_response or len(ai_response.strip()) == 0:
-            ai_response = "Hello! I received your message. How can I help you with your English learning today? 📚"
-            logger.warning("⚠️ 使用預設回應")
-        
-        # 更新學生統計
-        if student:
-            try:
-                update_student_stats(student.id)
-                logger.info("📊 學生統計已更新")
-            except Exception as stats_error:
-                logger.error(f"⚠️ 統計更新失敗: {stats_error}")
-        
-        # 發送回應 - 關鍵修復點
-        logger.info("📤 準備發送 LINE 回應...")
-        try:
-            # 確保回應不會太長（LINE 有字數限制）
-            if len(ai_response) > 2000:
-                ai_response = ai_response[:1900] + "... (message truncated)"
-                logger.warning("⚠️ 回應內容過長，已截斷")
-            
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=ai_response)
-            )
-            logger.info("✅ LINE 回應發送成功")
-            
-        except Exception as line_error:
-            logger.error(f"❌ LINE 回應發送失敗: {line_error}")
-            logger.error(f"❌ LINE 錯誤類型: {type(line_error).__name__}")
-            
-            # 嘗試發送簡化回應
-            try:
-                simple_response = "Hello! I received your message. 👋"
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text=simple_response)
-                )
-                logger.info("✅ 簡化回應發送成功")
-            except Exception as final_error:
-                logger.error(f"💥 所有回應嘗試都失敗: {final_error}")
-                # 記錄完整錯誤資訊
-                import traceback
-                logger.error(f"💥 完整錯誤追蹤: {traceback.format_exc()}")
-        
-        logger.info(f"🎉 訊息處理完成: {user_id}")
-        
-    except Exception as e:
-        logger.error(f"💥 處理訊息時發生嚴重錯誤: {str(e)}")
-        logger.error(f"💥 錯誤類型: {type(e).__name__}")
-        
-        # 記錄完整錯誤追蹤
-        import traceback
-        logger.error(f"💥 完整錯誤追蹤: {traceback.format_exc()}")
-        
-        # 最後的緊急回應
-        try:
-            if line_bot_api and hasattr(event, 'reply_token'):
-                emergency_response = "System error. Please try again. 🔧"
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text=emergency_response)
-                )
-                logger.info("🚨 緊急回應已發送")
-        except:
-            logger.error("💥 連緊急回應都無法發送")
-            
 # =================== 健康檢查和狀態路由 ===================
 
 @app.route('/health')
 def health_check():
     """健康檢查端點 - 修復版本"""
     try:
-        # 檢查並修復資料庫連接
         db_connection_ok = ensure_db_connection()
         db_status = get_db_status()
         
@@ -1226,78 +883,19 @@ def health_check():
         return {
             'status': overall_status,
             'timestamp': datetime.datetime.now().isoformat(),
-            'database': db_status,  # 現在應該顯示 "connected"
-            'database_queries': 'ok' if db_query_ok else 'error',
-            'database_connection_attempts': 'successful' if db_connection_ok else 'failed',
+            'database': db_status,
             'line_bot': 'configured' if line_bot_api else 'not_configured',
             'gemini_ai': 'configured' if GEMINI_API_KEY else 'not_configured',
-            'web_interface': 'available' if WEB_TEMPLATES_AVAILABLE else 'not_available',
-            'improved_analytics': 'available' if IMPROVED_ANALYTICS_AVAILABLE else 'not_available',
             'real_data_stats': data_status,
-            'has_real_data': data_status['has_real_data'],
-            'data_cleanliness': 'clean' if not data_status['has_demo_data'] else 'has_demo_data'
+            'has_real_data': data_status['has_real_data']
         }
     except Exception as e:
         logger.error(f"健康檢查嚴重錯誤: {e}")
         return {
             'status': 'critical_error',
             'error': str(e),
-            'timestamp': datetime.datetime.now().isoformat(),
-            'database': 'unknown',
-            'line_bot': 'configured' if line_bot_api else 'not_configured',
-            'gemini_ai': 'configured' if GEMINI_API_KEY else 'not_configured'
+            'timestamp': datetime.datetime.now().isoformat()
         }, 500
-
-@app.route('/real-data-status')
-def real_data_status():
-    """真實資料狀態檢查"""
-    try:
-        if IMPROVED_ANALYTICS_AVAILABLE:
-            has_data = has_real_student_data()
-            insights_data = get_improved_teaching_insights()
-            
-            return render_template_string(f"""
-            <div style="font-family: sans-serif; padding: 20px;">
-                <h1>📊 真實資料狀態報告</h1>
-                <div style="background: {'#e7f3ff' if has_data else '#fff3cd'}; padding: 15px; margin: 15px 0; border-radius: 5px;">
-                    <h3>{'✅' if has_data else '⏳'} 資料狀態：{'有真實資料' if has_data else '等待真實資料'}</h3>
-                    <p><strong>真實學生數：</strong>{insights_data['stats']['real_students']}</p>
-                    <p><strong>總訊息數：</strong>{insights_data['stats']['total_messages']}</p>
-                    <p><strong>最後更新：</strong>{insights_data.get('timestamp', 'N/A')}</p>
-                </div>
-                {f'<div style="background: #fff3cd; padding: 15px; margin: 15px 0; border-radius: 5px;"><p>系統正在等待學生使用 LINE Bot。請確認學生已開始與 AI 對話。</p></div>' if not has_data else ''}
-                <div style="margin-top: 20px;">
-                    <a href="/teaching-insights" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px;">返回分析後台</a>
-                    <a href="/admin/cleanup" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px;">清理演示資料</a>
-                </div>
-            </div>
-            """)
-        else:
-            data_status = db_cleaner.get_real_data_status()
-            return f"""
-            <div style="font-family: sans-serif; padding: 20px;">
-                <h1>📊 真實資料狀態報告</h1>
-                <div style="background: {'#e7f3ff' if data_status['has_real_data'] else '#fff3cd'}; padding: 15px; margin: 15px 0; border-radius: 5px;">
-                    <h3>{'✅' if data_status['has_real_data'] else '⏳'} 資料狀態：{'有真實資料' if data_status['has_real_data'] else '等待真實資料'}</h3>
-                    <p><strong>真實學生數：</strong>{data_status['real_students']}</p>
-                    <p><strong>真實訊息數：</strong>{data_status['real_messages']}</p>
-                    <p><strong>演示學生數：</strong>{data_status['demo_students']}</p>
-                    <p><strong>演示訊息數：</strong>{data_status['demo_messages']}</p>
-                </div>
-                <div style="margin-top: 20px;">
-                    <a href="/" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px;">返回首頁</a>
-                    <a href="/admin/cleanup" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px;">清理演示資料</a>
-                </div>
-            </div>
-            """
-    except Exception as e:
-        return f"""
-        <div style="font-family: sans-serif; padding: 20px;">
-            <h1>❌ 真實資料狀態檢查失敗</h1>
-            <p>錯誤：{str(e)}</p>
-            <a href="/">返回首頁</a>
-        </div>
-        """, 500
 
 # =================== 錯誤處理 ===================
 
@@ -1310,7 +908,7 @@ def not_found(error):
         <p>您要訪問的頁面不存在。</p>
         <div style="margin-top: 20px;">
             <a href="/" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🏠 返回首頁</a>
-            <a href="/teaching-insights" style="padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">📊 分析後台</a>
+            <a href="/admin" style="padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">🔧 管理後台</a>
         </div>
     </div>
     """, 404
@@ -1335,7 +933,7 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_ENV") == "development"
     
-    logger.info(f"🚀 啟動 EMI 智能教學助理（增強修復版）")
+    logger.info(f"🚀 啟動 EMI 智能教學助理（修復版本）")
     
     # 系統組件檢查
     logger.info(f"📱 LINE Bot: {'已配置' if line_bot_api else '未配置'}")
@@ -1352,7 +950,6 @@ if __name__ == '__main__':
             logger.error("❌ 資料庫初始化失敗，但繼續啟動")
     except Exception as db_init_error:
         logger.error(f"❌ 資料庫初始化異常: {db_init_error}")
-        # 嘗試使用原有方法
         try:
             initialize_db()
             logger.info("✅ 使用原有方法初始化資料庫成功")
@@ -1381,6 +978,7 @@ if __name__ == '__main__':
     if GEMINI_API_KEY:
         logger.info("✅ Gemini AI API 金鑰已設定")
         try:
+            from utils import model
             if model:
                 logger.info("✅ Gemini 模型初始化成功")
             else:
@@ -1392,16 +990,16 @@ if __name__ == '__main__':
     
     logger.info("🔧 主要 API 端點:")
     logger.info("   - 健康檢查: /health")
-    logger.info("   - 真實資料狀態: /real-data-status")
     logger.info("   - LINE Bot Webhook: /callback")
-    logger.info("   - 儀表板統計: /api/dashboard-stats")
+    logger.info("   - 管理員後台: /admin")
+    logger.info("   - 更新學生暱稱: /admin/update-line-names")
     
     logger.info("✅ 修復增強功能:")
-    logger.info("   ✅ 強化資料庫連接管理和自動修復")
-    logger.info("   ✅ 增強錯誤處理和詳細日誌記錄")
-    logger.info("   ✅ AI 回應多層備案機制")
-    logger.info("   ✅ LINE Bot 錯誤恢復和重試機制")
-    logger.info("   ✅ 系統健康狀態實時修復")
+    logger.info("   ✅ 修復語法錯誤和重複 try 區塊")
+    logger.info("   ✅ 添加 LINE 用戶暱稱自動獲取功能")
+    logger.info("   ✅ 管理員儀表板和批量更新功能")
+    logger.info("   ✅ 強化錯誤處理和日誌記錄")
+    logger.info("   ✅ 系統健康狀態監控")
     
     logger.info(f"🔗 啟動參數: Port={port}, Debug={debug}")
     logger.info("🎉 系統修復完成，準備處理請求...")
