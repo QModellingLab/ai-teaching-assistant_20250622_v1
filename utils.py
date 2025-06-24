@@ -315,3 +315,204 @@ def test_ai_connection():
 def generate_ai_response(student_id, query, conversation_context="", student_context="", group_id=None):
     """原有函數的兼容性包裝"""
     return generate_ai_response_with_smart_fallback(student_id, query, conversation_context, student_context, group_id)
+# 將這些函數添加到 utils.py 檔案的末尾
+
+def analyze_student_patterns(student_id):
+    """分析學生學習模式"""
+    try:
+        student = Student.get_by_id(student_id)
+        messages = list(Message.select().where(Message.student_id == student_id))
+        
+        # 分析訊息類型分布
+        message_types = {}
+        for msg in messages:
+            msg_type = msg.message_type or 'general'
+            message_types[msg_type] = message_types.get(msg_type, 0) + 1
+        
+        # 分析活動時間模式
+        if messages:
+            timestamps = [msg.timestamp for msg in messages if msg.timestamp]
+            if timestamps:
+                earliest = min(timestamps)
+                latest = max(timestamps)
+                active_days = (latest - earliest).days + 1
+            else:
+                active_days = 0
+        else:
+            active_days = 0
+        
+        # 計算平均訊息長度
+        if messages:
+            avg_message_length = sum(len(msg.content) for msg in messages) / len(messages)
+        else:
+            avg_message_length = 0
+        
+        return {
+            'student_id': student_id,
+            'student_name': student.name,
+            'total_messages': len(messages),
+            'message_types': message_types,
+            'participation_rate': student.participation_rate,
+            'question_count': student.question_count,
+            'active_days': active_days,
+            'avg_message_length': round(avg_message_length, 2),
+            'analysis_timestamp': datetime.datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"分析學生模式錯誤: {e}")
+        return {'error': str(e)}
+
+def update_student_stats(student_id, message_type='message'):
+    """更新學生統計資料"""
+    try:
+        student = Student.get_by_id(student_id)
+        
+        # 重新計算所有統計
+        messages = list(Message.select().where(Message.student_id == student_id))
+        
+        # 更新訊息計數
+        student.message_count = len(messages)
+        
+        # 更新問題計數
+        questions = [msg for msg in messages if msg.message_type == 'question']
+        student.question_count = len(questions)
+        
+        # 計算參與率
+        if student.message_count > 0:
+            # 這裡的公式可以根據你的需求調整
+            question_ratio = student.question_count / student.message_count
+            student.participation_rate = min(100, question_ratio * 100)
+        else:
+            student.participation_rate = 0
+        
+        # 更新最後活動時間
+        if messages:
+            latest_message = max(messages, key=lambda m: m.timestamp if m.timestamp else datetime.datetime.min)
+            student.last_active = latest_message.timestamp
+        else:
+            student.last_active = datetime.datetime.now()
+        
+        # 儲存更新
+        student.save()
+        
+        logger.info(f"✅ 學生 {student.name} 統計已更新: {student.message_count} 訊息, {student.question_count} 問題")
+        
+        return {
+            'success': True,
+            'student_id': student_id,
+            'message_count': student.message_count,
+            'question_count': student.question_count,
+            'participation_rate': round(student.participation_rate, 2),
+            'last_active': student.last_active.isoformat() if student.last_active else None
+        }
+        
+    except Exception as e:
+        logger.error(f"更新學生統計錯誤: {e}")
+        return {'success': False, 'error': str(e)}
+
+def get_question_category_stats():
+    """取得問題分類統計"""
+    try:
+        # 從 Analysis 表格取得分類資料
+        analyses = list(Analysis.select().where(
+            Analysis.analysis_type == 'question_classification'
+        ))
+        
+        if not analyses:
+            return {
+                'total_questions': 0,
+                'categories': {},
+                'message': '目前沒有問題分類資料'
+            }
+        
+        # 統計各類別
+        categories = {}
+        for analysis in analyses:
+            try:
+                data = json.loads(analysis.analysis_data)
+                category = data.get('content_domain', 'Unknown')
+                categories[category] = categories.get(category, 0) + 1
+            except (json.JSONDecodeError, KeyError):
+                categories['Unknown'] = categories.get('Unknown', 0) + 1
+        
+        return {
+            'total_questions': len(analyses),
+            'categories': categories,
+            'top_category': max(categories.items(), key=lambda x: x[1])[0] if categories else None,
+            'generated_at': datetime.datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"問題分類統計錯誤: {e}")
+        return {'error': str(e)}
+
+def get_student_conversation_summary(student_id, days=30):
+    """取得學生對話摘要"""
+    try:
+        student = Student.get_by_id(student_id)
+        
+        # 取得指定天數內的訊息
+        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days)
+        messages = list(Message.select().where(
+            (Message.student_id == student_id) &
+            (Message.timestamp > cutoff_date)
+        ).order_by(Message.timestamp.desc()))
+        
+        if not messages:
+            return {
+                'student_id': student_id,
+                'student_name': student.name,
+                'period_days': days,
+                'message_count': 0,
+                'summary': '在此期間沒有對話記錄',
+                'status': 'no_data'
+            }
+        
+        # 分析訊息類型
+        questions = [msg for msg in messages if msg.message_type == 'question']
+        statements = [msg for msg in messages if msg.message_type == 'statement']
+        
+        # 產生簡單摘要
+        summary_parts = []
+        summary_parts.append(f"在最近 {days} 天內，{student.name} 共發送了 {len(messages)} 則訊息")
+        
+        if questions:
+            summary_parts.append(f"其中包含 {len(questions)} 個問題")
+        
+        if statements:
+            summary_parts.append(f"以及 {len(statements)} 個陳述")
+        
+        # 計算活躍度
+        if len(messages) >= 10:
+            activity_level = "高度活躍"
+        elif len(messages) >= 5:
+            activity_level = "適度活躍"
+        else:
+            activity_level = "較少參與"
+        
+        summary_parts.append(f"整體參與度為：{activity_level}")
+        
+        return {
+            'student_id': student_id,
+            'student_name': student.name,
+            'period_days': days,
+            'message_count': len(messages),
+            'question_count': len(questions),
+            'statement_count': len(statements),
+            'activity_level': activity_level,
+            'summary': '。'.join(summary_parts) + '。',
+            'generated_at': datetime.datetime.now().isoformat(),
+            'status': 'success'
+        }
+        
+    except Exception as e:
+        logger.error(f"對話摘要錯誤: {e}")
+        return {
+            'student_id': student_id,
+            'error': str(e),
+            'status': 'error'
+        }
+
+# 兼容性別名
+get_ai_response = generate_ai_response_with_smart_fallback
