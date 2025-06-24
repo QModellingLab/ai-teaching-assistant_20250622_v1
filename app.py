@@ -109,7 +109,76 @@ else:
 
 # 資料庫初始化
 initialize_db()
+# =================== 資料庫連接管理 ===================
 
+def ensure_db_connection():
+    """確保資料庫連接正常"""
+    try:
+        if db.is_closed():
+            logger.info("🔄 資料庫連接已關閉，正在重新連接...")
+            db.connect()
+            logger.info("✅ 資料庫重新連接成功")
+        
+        # 測試連接
+        db.execute_sql('SELECT 1')
+        logger.info("✅ 資料庫連接測試通過")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ 資料庫連接失敗: {e}")
+        logger.error(f"❌ 連接錯誤類型: {type(e).__name__}")
+        
+        # 嘗試重新連接
+        try:
+            if not db.is_closed():
+                db.close()
+            db.connect()
+            db.execute_sql('SELECT 1')
+            logger.info("✅ 資料庫強制重連成功")
+            return True
+        except Exception as retry_error:
+            logger.error(f"❌ 資料庫重連也失敗: {retry_error}")
+            return False
+
+def get_db_status():
+    """取得資料庫狀態"""
+    try:
+        if db.is_closed():
+            return "disconnected"
+        
+        # 測試查詢
+        db.execute_sql('SELECT 1')
+        return "connected"
+        
+    except Exception as e:
+        logger.error(f"資料庫狀態檢查錯誤: {e}")
+        return "error"
+
+def initialize_db_with_retry(max_retries=3):
+    """帶重試機制的資料庫初始化"""
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"📊 嘗試初始化資料庫 (第 {attempt + 1} 次)")
+            
+            # 原有的初始化邏輯
+            initialize_db()
+            
+            # 確保連接
+            if ensure_db_connection():
+                logger.info("✅ 資料庫初始化完成")
+                return True
+            else:
+                logger.warning(f"⚠️ 資料庫初始化嘗試 {attempt + 1} 失敗")
+                
+        except Exception as e:
+            logger.error(f"❌ 資料庫初始化錯誤 (嘗試 {attempt + 1}): {e}")
+            
+        if attempt < max_retries - 1:
+            import time
+            time.sleep(2)  # 等待 2 秒後重試
+    
+    logger.error("💥 資料庫初始化完全失敗")
+    return False
 # =================== 資料庫清理功能 ===================
 
 class DatabaseCleaner:
