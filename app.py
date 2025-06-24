@@ -1059,7 +1059,7 @@ def handle_message(event):
                 logger.error("❌ GEMINI_API_KEY 未配置")
                 ai_response = "Hello! I'm currently being set up. Please try again in a moment. 👋"
             else:
-                ai_response = get_ai_response(user_message, student.id if student else None)
+                ai_response = get_ai_response(student.id if student else None, user_message)
                 logger.info(f"✅ AI 回應生成成功，長度: {len(ai_response)}")
                 
         except Exception as ai_error:
