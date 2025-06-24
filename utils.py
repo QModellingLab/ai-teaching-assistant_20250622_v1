@@ -23,13 +23,22 @@ model = None
 current_model_name = "gemini-1.5-flash"
 model_rotation_index = 0
 
-# 可用模型列表（按優先順序排列）
+# 建議的模型優先順序配置
+# 基於配額、性能和版本新舊程度
+
 AVAILABLE_MODELS = [
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-1.0-pro",
-    "gemini-1.5-flash-8b"
+    "gemini-2.0-flash",        # 🥇 最優先：最新版本 + 高配額(200次/日)
+    "gemini-2.0-flash-lite",   # 🥈 第二：輕量版 + 高配額(200次/日)  
+    "gemini-1.5-flash",        # 🥉 第三：成熟穩定 + 中配額(50次/日)
+    "gemini-1.5-flash-8b",     # 🏅 第四：效率優化 + 中配額(50次/日)
+    "gemini-1.5-pro",          # 🏅 第五：功能完整但較慢
+    "gemini-1.0-pro",          # 🏅 最後備用：舊版本但穩定
 ]
+
+# 調整理由：
+# 1. 2.0 版本優先（配額更高，性能更好）
+# 2. 1.5-flash-8b 比 1.0-pro 優先（版本更新 + 速度更快）
+# 3. 保持向下兼容的備用方案
 
 # 模型使用統計
 model_usage_stats = {model: {'calls': 0, 'errors': 0, 'last_used': None} for model in AVAILABLE_MODELS}
