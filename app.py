@@ -1140,29 +1140,47 @@ def handle_message(event):
 
 @app.route('/health')
 def health_check():
-    """健康檢查端點 - 真實資料版本"""
+    """健康檢查端點 - 修復版本"""
     try:
-        db_status = 'connected' if not db.is_closed() else 'disconnected'
+        # 檢查並修復資料庫連接
+        db_connection_ok = ensure_db_connection()
+        db_status = get_db_status()
         
         try:
-            data_status = db_cleaner.get_real_data_status()
-            db_query_ok = True
-        except Exception:
+            if db_connection_ok:
+                data_status = db_cleaner.get_real_data_status()
+                db_query_ok = True
+            else:
+                data_status = {
+                    'real_students': 0,
+                    'real_messages': 0,
+                    'demo_students': 0,
+                    'demo_messages': 0,
+                    'has_real_data': False,
+                    'has_demo_data': False
+                }
+                db_query_ok = False
+        except Exception as query_error:
+            logger.error(f"資料查詢錯誤: {query_error}")
             data_status = {
                 'real_students': 0,
                 'real_messages': 0,
                 'demo_students': 0,
                 'demo_messages': 0,
                 'has_real_data': False,
-                'has_demo_data': False
+                'has_demo_data': False,
+                'error': str(query_error)
             }
             db_query_ok = False
         
+        overall_status = 'healthy' if (db_connection_ok and db_query_ok) else 'degraded'
+        
         return {
-            'status': 'healthy' if db_query_ok else 'degraded',
+            'status': overall_status,
             'timestamp': datetime.datetime.now().isoformat(),
-            'database': db_status,
+            'database': db_status,  # 現在應該顯示 "connected"
             'database_queries': 'ok' if db_query_ok else 'error',
+            'database_connection_attempts': 'successful' if db_connection_ok else 'failed',
             'line_bot': 'configured' if line_bot_api else 'not_configured',
             'gemini_ai': 'configured' if GEMINI_API_KEY else 'not_configured',
             'web_interface': 'available' if WEB_TEMPLATES_AVAILABLE else 'not_available',
@@ -1172,10 +1190,14 @@ def health_check():
             'data_cleanliness': 'clean' if not data_status['has_demo_data'] else 'has_demo_data'
         }
     except Exception as e:
+        logger.error(f"健康檢查嚴重錯誤: {e}")
         return {
-            'status': 'error',
+            'status': 'critical_error',
             'error': str(e),
-            'timestamp': datetime.datetime.now().isoformat()
+            'timestamp': datetime.datetime.now().isoformat(),
+            'database': 'unknown',
+            'line_bot': 'configured' if line_bot_api else 'not_configured',
+            'gemini_ai': 'configured' if GEMINI_API_KEY else 'not_configured'
         }, 500
 
 @app.route('/real-data-status')
