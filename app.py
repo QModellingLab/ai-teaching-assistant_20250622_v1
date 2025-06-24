@@ -1020,7 +1020,7 @@ def handle_message(event):
         try:
             student, created = Student.get_or_create(
                 line_user_id=user_id,
-                defaults={'name': f'學生_{user_id[-4:]}'}
+                defaults={'name': f'LINE用戶_{user_id}'}
             )
             logger.info(f"👤 學生記錄: {student.name} ({'新建' if created else '既有'})")
             
