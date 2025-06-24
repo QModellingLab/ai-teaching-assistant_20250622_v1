@@ -1283,56 +1283,121 @@ def internal_error(error):
 
 # =================== 程式進入點 ===================
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_ENV") == "development"
     
-    logger.info(f"🚀 啟動 EMI 智能教學助理（真實資料版）")
+    logger.info(f"🚀 啟動 EMI 智能教學助理（增強修復版）")
+    
+    # 系統組件檢查
     logger.info(f"📱 LINE Bot: {'已配置' if line_bot_api else '未配置'}")
+    logger.info(f"🤖 Gemini AI: {'已配置' if GEMINI_API_KEY else '未配置'}")
     logger.info(f"🌐 Web 管理後台: {'可用' if WEB_TEMPLATES_AVAILABLE else '不可用'}")
     logger.info(f"📊 改進分析系統: {'已載入' if IMPROVED_ANALYTICS_AVAILABLE else '未載入'}")
-    logger.info(f"🤖 Gemini AI: {'已配置' if GEMINI_API_KEY else '未配置'}")
-    logger.info(f"🎯 資料處理: 只分析真實學生資料")
-    logger.info(f"🔗 Port: {port}, Debug: {debug}")
     
-    if WEB_TEMPLATES_AVAILABLE:
-        logger.info("📊 Web 管理後台路由:")
-        logger.info("   - 首頁: / （支援等待狀態）")
-        logger.info("   - 學生管理: /students （只顯示真實學生）")
-        logger.info("   - 教師洞察: /teaching-insights （真實資料分析）")
-        logger.info("   - 對話摘要: /conversation-summaries")
-        logger.info("   - 學習建議: /learning-recommendations")
-        logger.info("   - 儲存管理: /storage-management")
+    # 強化資料庫初始化
+    logger.info("📊 初始化資料庫連接...")
+    try:
+        if initialize_db_with_retry():
+            logger.info("✅ 資料庫初始化成功")
+        else:
+            logger.error("❌ 資料庫初始化失敗，但繼續啟動")
+    except Exception as db_init_error:
+        logger.error(f"❌ 資料庫初始化異常: {db_init_error}")
+        # 嘗試使用原有方法
+        try:
+            initialize_db()
+            logger.info("✅ 使用原有方法初始化資料庫成功")
+        except Exception as fallback_error:
+            logger.error(f"❌ 所有資料庫初始化方法都失敗: {fallback_error}")
     
-    logger.info("🔧 API 端點:")
+    # 最終連接狀態檢查
+    try:
+        db_status = get_db_status()
+        logger.info(f"📊 資料庫最終狀態: {db_status}")
+    except Exception as status_error:
+        logger.error(f"❌ 無法檢查資料庫狀態: {status_error}")
+    
+    # LINE Bot 配置詳細檢查
+    if line_bot_api and handler:
+        logger.info("✅ LINE Bot 完全配置完成")
+        logger.info("📞 Webhook URL: https://web-production-c8b8.up.railway.app/callback")
+    else:
+        logger.warning("⚠️ LINE Bot 配置不完整")
+        if not CHANNEL_ACCESS_TOKEN:
+            logger.error("❌ CHANNEL_ACCESS_TOKEN 未設定")
+        if not CHANNEL_SECRET:
+            logger.error("❌ CHANNEL_SECRET 未設定")
+    
+    # Gemini AI 配置詳細檢查
+    if GEMINI_API_KEY:
+        logger.info("✅ Gemini AI API 金鑰已設定")
+        try:
+            if model:
+                logger.info("✅ Gemini 模型初始化成功")
+            else:
+                logger.warning("⚠️ Gemini 模型初始化失敗，但 API 金鑰存在")
+        except Exception as model_check_error:
+            logger.error(f"❌ Gemini 模型檢查失敗: {model_check_error}")
+    else:
+        logger.error("❌ GEMINI_API_KEY 未設定")
+    
+    logger.info("🔧 主要 API 端點:")
     logger.info("   - 健康檢查: /health")
     logger.info("   - 真實資料狀態: /real-data-status")
-    logger.info("   - 儀表板統計: /api/dashboard-stats （支援真實資料檢測）")
-    logger.info("   - 資料匯出: /api/export/<type> （只匯出真實資料）")
-    logger.info("   - 檔案下載: /download/<filename>")
-    logger.info("   - 學生分析: /api/student-analysis/<id> （只分析真實學生）")
-    logger.info("   - 班級統計: /api/class-statistics （只統計真實學生）")
     logger.info("   - LINE Bot Webhook: /callback")
+    logger.info("   - 儀表板統計: /api/dashboard-stats")
     
-    logger.info("🧹 管理功能:")
-    logger.info("   - 清理頁面: /admin/cleanup")
-    logger.info("   - 執行清理: /admin/cleanup/execute")
-    logger.info("   - 資料狀態: /admin/data-status")
-    logger.info("   - 清理狀態API: /api/cleanup/status")
-    logger.info("   - 執行清理API: /api/cleanup/execute")
+    logger.info("✅ 修復增強功能:")
+    logger.info("   ✅ 強化資料庫連接管理和自動修復")
+    logger.info("   ✅ 增強錯誤處理和詳細日誌記錄")
+    logger.info("   ✅ AI 回應多層備案機制")
+    logger.info("   ✅ LINE Bot 錯誤恢復和重試機制")
+    logger.info("   ✅ 系統健康狀態實時修復")
     
-    logger.info("✅ 重要改進：")
-    logger.info("   ✅ 移除演示資料：系統只處理真實學生資料")
-    logger.info("   ✅ 增強對話記憶：30輪對話，24小時記憶")
-    logger.info("   ✅ 資料庫清理：提供完整的演示資料清理功能")
-    logger.info("   ✅ 管理後台：新增管理員清理介面")
-    logger.info("   ✅ 真實資料檢測：自動檢測並顯示適當介面")
+    logger.info(f"🔗 啟動參數: Port={port}, Debug={debug}")
+    logger.info("🎉 系統修復完成，準備處理請求...")
     
-    app.run(
-        debug=debug,
-        host='0.0.0.0',
-        port=port
-    )
+    try:
+        app.run(
+            debug=debug,
+            host='0.0.0.0',
+            port=port
+        )
+    except Exception as startup_error:
+        logger.error(f"💥 應用程式啟動失敗: {startup_error}")
+        raise
 
-# WSGI 應用程式入口點
+# WSGI 應用程式入口點（用於 Railway 生產環境）
 application = app
+
+# 生產環境啟動檢查（當由 Gunicorn 啟動時執行）
+if __name__ != '__main__':
+    logger.info("🚀 生產環境啟動檢查...")
+    
+    # 檢查關鍵環境變數
+    config_issues = []
+    if not CHANNEL_ACCESS_TOKEN:
+        config_issues.append("CHANNEL_ACCESS_TOKEN 未設定")
+    if not CHANNEL_SECRET:
+        config_issues.append("CHANNEL_SECRET 未設定")
+    if not GEMINI_API_KEY:
+        config_issues.append("GEMINI_API_KEY 未設定")
+    
+    if config_issues:
+        logger.error("❌ 生產環境配置問題:")
+        for issue in config_issues:
+            logger.error(f"   - {issue}")
+    else:
+        logger.info("✅ 生產環境配置檢查通過")
+    
+    # 生產環境資料庫初始化
+    try:
+        if not initialize_db_with_retry():
+            logger.error("❌ 生產環境資料庫初始化失敗")
+        else:
+            logger.info("✅ 生產環境資料庫初始化成功")
+    except Exception as prod_db_error:
+        logger.error(f"❌ 生產環境資料庫初始化異常: {prod_db_error}")
+    
+    logger.info("🎯 生產環境準備完成")
