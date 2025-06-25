@@ -2808,9 +2808,11 @@ def callback():
     
     return 'OK'
 
+# 替換 app.py 中第 4 段的 handle_message 函數
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    """處理文字訊息"""
+    """處理文字訊息 - 修復版本"""
     if not line_bot_api:
         logger.error("❌ LINE Bot API 未初始化")
         return
@@ -2822,12 +2824,40 @@ def handle_message(event):
         
         logger.info(f"👤 用戶 {user_id} 訊息: {user_message}")
         
-        # 更新或創建學生記錄
+        # 更新或創建學生記錄 - 修復版本
         from models import Student
         try:
-            student = Student.get_by_line_id(user_id)
-        except:
-            student = Student.create_from_line_id(user_id)
+            # 使用 get_or_create 方法來安全地取得或創建學生
+            student, created = Student.get_or_create(
+                line_user_id=user_id,
+                defaults={
+                    'name': f'學生_{user_id[-4:]}',
+                    'created_at': datetime.datetime.now(),
+                    'last_active': datetime.datetime.now(),
+                    'is_active': True
+                }
+            )
+            
+            if created:
+                logger.info(f"🆕 創建新學生記錄: {student.name}")
+            else:
+                # 更新現有學生的最後活動時間
+                student.last_active = datetime.datetime.now()
+                student.save()
+                logger.info(f"📝 更新學生活動: {student.name}")
+                
+        except Exception as student_error:
+            logger.error(f"❌ 學生記錄處理錯誤: {student_error}")
+            # 發送錯誤訊息給用戶
+            try:
+                error_message = "System is experiencing some issues. Please try again later. 🔧"
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=error_message)
+                )
+            except:
+                pass
+            return
         
         # 判斷訊息類型
         message_type = 'question' if '?' in user_message or user_message.lower().startswith(('what', 'how', 'why', 'when', 'where', 'who', 'which', 'can', 'could', 'would', 'should', 'is', 'are', 'do', 'does', 'did')) else 'statement'
@@ -2861,8 +2891,17 @@ def handle_message(event):
         
         # 更新學生統計
         try:
-            from utils import update_student_stats
-            update_student_stats(student.id, user_message, ai_response)
+            # 計算新的統計數據
+            from models import Message
+            total_messages = Message.select().where(Message.student_id == student.id).count()
+            total_questions = Message.select().where(
+                (Message.student_id == student.id) & 
+                ((Message.message_type == 'question') | (Message.content.contains('?')))
+            ).count()
+            
+            # 更新學生統計
+            student.update_stats(total_messages, total_questions)
+            
         except Exception as stats_error:
             logger.warning(f"⚠️ 更新學生統計失敗: {stats_error}")
     
