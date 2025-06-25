@@ -26,19 +26,124 @@ model_rotation_index = 0
 # 建議的模型優先順序配置
 # 基於配額、性能和版本新舊程度
 
+# =================== 在 utils.py 中找到並替換這個區段 ===================
+
+# 找到 utils.py 中的 AVAILABLE_MODELS 定義，替換為：
+
 AVAILABLE_MODELS = [
-    "gemini-2.0-flash",        # 🥇 最優先：最新版本 + 高配額(200次/日)
-    "gemini-2.0-flash-lite",   # 🥈 第二：輕量版 + 高配額(200次/日)  
-    "gemini-1.5-flash",        # 🥉 第三：成熟穩定 + 中配額(50次/日)
-    "gemini-1.5-flash-8b",     # 🏅 第四：效率優化 + 中配額(50次/日)
-    "gemini-1.5-pro",          # 🏅 第五：功能完整但較慢
-    "gemini-1.0-pro",          # 🏅 最後備用：舊版本但穩定
+    "gemini-2.5-flash",        # 🥇 首選：最佳性價比 + 思考能力 + 速度
+    "gemini-2.5-pro",          # 🏆 深度分析：最高智能 + 複雜推理
+    "gemini-2.5-flash-lite",   # 🚀 高效處理：最快速度 + 最低成本
+    "gemini-2.0-flash",        # 🥈 穩定選擇：成熟穩定 + 多模態
+    "gemini-2.0-pro",          # 💻 專業任務：編程專家 + 2M context
+    "gemini-2.0-flash-lite",   # 💰 經濟選擇：成本優化 + 比1.5更佳
+    # === 備用舊版本 (向下兼容) ===
+    "gemini-1.5-flash",        # 📦 備案1：成熟穩定 + 中配額
+    "gemini-1.5-flash-8b",     # 📦 備案2：效率優化版本
+    "gemini-1.5-pro",          # 📦 備案3：功能完整但較慢
+    "gemini-1.0-pro",          # 📦 最後備案：舊版但穩定
 ]
 
-# 調整理由：
-# 1. 2.0 版本優先（配額更高，性能更好）
-# 2. 1.5-flash-8b 比 1.0-pro 優先（版本更新 + 速度更快）
-# 3. 保持向下兼容的備用方案
+# 同時更新或添加這些配置：
+
+# 模型特性說明 (用於健康檢查和管理)
+MODEL_SPECIFICATIONS = {
+    "gemini-2.5-flash": {
+        "generation": "2.5",
+        "type": "Flash",
+        "features": ["thinking", "speed", "efficiency", "1M_context"],
+        "cost_tier": "balanced",
+        "free_limit": "high",
+        "best_for": "日常教學、快速回應、平衡任務"
+    },
+    "gemini-2.5-pro": {
+        "generation": "2.5",
+        "type": "Pro",
+        "features": ["thinking", "coding", "complex_reasoning", "1M_context"],
+        "cost_tier": "premium",
+        "free_limit": "moderate",
+        "best_for": "複雜分析、高級編程、深度思考任務"
+    },
+    "gemini-2.5-flash-lite": {
+        "generation": "2.5",
+        "type": "Flash-Lite",
+        "features": ["ultra_fast", "ultra_cheap", "high_throughput", "thinking"],
+        "cost_tier": "economy",
+        "free_limit": "very_high",
+        "best_for": "大量請求、分類、摘要任務"
+    },
+    "gemini-2.0-flash": {
+        "generation": "2.0",
+        "type": "Flash",
+        "features": ["agentic", "multimodal", "low_latency", "stable"],
+        "cost_tier": "standard",
+        "free_limit": "high",
+        "best_for": "代理任務、即時互動、穩定服務"
+    },
+    "gemini-2.0-pro": {
+        "generation": "2.0",
+        "type": "Pro",
+        "features": ["experimental", "coding_expert", "2M_context", "tools"],
+        "cost_tier": "premium",
+        "free_limit": "limited",
+        "best_for": "實驗性編程、大型文檔分析"
+    },
+    "gemini-2.0-flash-lite": {
+        "generation": "2.0",
+        "type": "Flash-Lite",
+        "features": ["cost_efficient", "improved_quality", "1M_context"],
+        "cost_tier": "economy",
+        "free_limit": "very_high",
+        "best_for": "成本敏感任務、高頻使用"
+    },
+    # 備用模型
+    "gemini-1.5-flash": {
+        "generation": "1.5",
+        "type": "Flash",
+        "features": ["mature", "stable", "reliable"],
+        "cost_tier": "standard",
+        "free_limit": "moderate",
+        "best_for": "穩定生產環境"
+    },
+    "gemini-1.5-flash-8b": {
+        "generation": "1.5",
+        "type": "Flash-8B",
+        "features": ["optimized", "efficient"],
+        "cost_tier": "economy",
+        "free_limit": "moderate",
+        "best_for": "效率優化場景"
+    },
+    "gemini-1.5-pro": {
+        "generation": "1.5",
+        "type": "Pro",
+        "features": ["comprehensive", "slower"],
+        "cost_tier": "premium",
+        "free_limit": "limited",
+        "best_for": "完整功能需求"
+    },
+    "gemini-1.0-pro": {
+        "generation": "1.0",
+        "type": "Pro",
+        "features": ["legacy", "stable"],
+        "cost_tier": "standard",
+        "free_limit": "basic",
+        "best_for": "最後備用方案"
+    }
+}
+
+# 更新模型使用統計結構
+model_usage_stats = {
+    model: {
+        'calls': 0, 
+        'errors': 0, 
+        'last_used': None, 
+        'generation': MODEL_SPECIFICATIONS[model]['generation'],
+        'success_rate': 0.0
+    } for model in AVAILABLE_MODELS
+}
+
+# 更新預設模型為最新版本
+current_model_name = "gemini-2.5-flash"  # 從 1.5-flash 升級到 2.5-flash
 
 # 模型使用統計
 model_usage_stats = {model: {'calls': 0, 'errors': 0, 'last_used': None} for model in AVAILABLE_MODELS}
