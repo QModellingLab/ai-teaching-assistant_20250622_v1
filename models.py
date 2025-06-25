@@ -60,6 +60,88 @@ class Student(BaseModel):
     # 狀態
     is_active = BooleanField(default=True, verbose_name="是否活躍")
     notes = TextField(null=True, verbose_name="備註")
+
+    @classmethod
+    def get_by_line_id(cls, line_user_id):
+        """根據 LINE 用戶 ID 取得學生"""
+        try:
+            return cls.get(cls.line_user_id == line_user_id)
+        except cls.DoesNotExist:
+            raise cls.DoesNotExist(f"找不到 LINE ID 為 {line_user_id} 的學生")
+    
+    @classmethod
+    def create_from_line_id(cls, line_user_id, name=None):
+        """從 LINE 用戶 ID 創建新學生"""
+        if not name:
+            name = f"學生_{line_user_id[-4:]}"  # 使用 ID 後四位作為預設名稱
+        
+        try:
+            student = cls.create(
+                line_user_id=line_user_id,
+                name=name,
+                created_at=datetime.datetime.now(),
+                last_active=datetime.datetime.now(),
+                is_active=True
+            )
+            logger.info(f"✅ 創建新學生: {student.name} (LINE ID: {line_user_id})")
+            return student
+        except Exception as e:
+            logger.error(f"❌ 創建學生失敗: {e}")
+            raise
+    
+    @classmethod
+    def get_or_create_from_line_id(cls, line_user_id, name=None):
+        """取得或創建學生（建議使用這個方法）"""
+        try:
+            # 嘗試取得現有學生
+            student = cls.get_by_line_id(line_user_id)
+            # 更新最後活動時間
+            student.last_active = datetime.datetime.now()
+            student.save()
+            return student, False  # (學生物件, 是否為新創建)
+        except cls.DoesNotExist:
+            # 創建新學生
+            student = cls.create_from_line_id(line_user_id, name)
+            return student, True  # (學生物件, 是否為新創建)
+    
+    @classmethod
+    def get_by_id(cls, student_id):
+        """根據 ID 取得學生"""
+        try:
+            return cls.get_by_id(student_id)
+        except cls.DoesNotExist:
+            return None
+    
+    def update_activity(self):
+        """更新學生活動狀態"""
+        self.last_active = datetime.datetime.now()
+        self.save()
+    
+    def update_stats(self, new_message_count=None, new_question_count=None):
+        """更新學生統計資料"""
+        if new_message_count is not None:
+            self.message_count = new_message_count
+        if new_question_count is not None:
+            self.question_count = new_question_count
+            # 計算提問率
+            if self.message_count > 0:
+                self.question_rate = (self.question_count / self.message_count) * 100
+        
+        # 更新參與度 (簡單演算法)
+        if self.message_count > 0:
+            base_participation = min(self.message_count * 5, 50)  # 每則訊息5分，最多50分
+            question_bonus = min(self.question_count * 10, 30)    # 每個問題10分，最多30分
+            self.participation_rate = min(base_participation + question_bonus, 100)
+        
+        self.save()
+    
+    def get_conversation_summary(self):
+        """取得對話摘要"""
+        from app import generate_student_learning_summary
+        return generate_student_learning_summary(self.id)
+    
+    def __str__(self):
+        return f"Student({self.name}, {self.line_user_id})"
     
     class Meta:
         table_name = 'students'
