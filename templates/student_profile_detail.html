@@ -1,0 +1,819 @@
+{% extends "base_profile.html" %}
+
+{% block title %}{{ student.name }} - 學習檔案 | EMI智能教學助理{% endblock %}
+
+{% block page_title %}👤 {{ student.name }} - 個人學習檔案{% endblock %}
+{% block page_subtitle %}Personal Learning Profile - 完整學習歷程與即時分析{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+    <a href="/">🏠 首頁</a>
+    <span>›</span>
+    <a href="/admin">⚙️ 管理後台</a>
+    <span>›</span>
+    <a href="/students">👥 學生列表</a>
+    <span>›</span>
+    <span>👤 {{ student.name }}</span>
+</nav>
+{% endblock %}
+
+{% block nav_buttons %}
+<a href="/students" class="btn btn-secondary">← 返回列表</a>
+<a href="/students/{{ student.id }}/export" class="btn btn-export">💾 匯出檔案</a>
+<a href="#messages" class="btn btn-primary">💬 查看對話</a>
+<button onclick="refreshSummary()" class="btn btn-success">🔄 重新分析</button>
+{% endblock %}
+
+{% block stats_section %}
+<div class="stats-grid">
+    <div class="stat-card blue">
+        <h3>{{ learning_summary.message_count }}</h3>
+        <p>💬 總對話數</p>
+    </div>
+    <div class="stat-card green">
+        <h3>{{ learning_summary.question_count }}</h3>
+        <p>❓ 提問次數</p>
+    </div>
+    <div class="stat-card orange">
+        <h3>{{ "%.1f"|format(student.participation_rate) }}%</h3>
+        <p>📈 參與度</p>
+    </div>
+    <div class="stat-card purple">
+        <h3>{{ learning_summary.topics|length }}</h3>
+        <p>🎯 涵蓋主題</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block main_content %}
+<!-- 學生基本資訊 -->
+<div class="content-section">
+    <h2 class="section-title">
+        📋 基本資訊
+        <span style="font-size: 0.7em; color: #7f8c8d; font-weight: normal;">
+            註冊於 {{ student.created_at.strftime('%Y年%m月%d日') }}
+        </span>
+    </h2>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+        <!-- 個人資料 -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #3498db;">
+            <h4 style="color: #2c3e50; margin-bottom: 15px;">👤 個人資料</h4>
+            <div style="space-y: 8px;">
+                <p><strong>姓名:</strong> {{ student.name }}</p>
+                <p><strong>LINE ID:</strong> <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">{{ student.line_user_id }}</code></p>
+                {% if student.student_id %}
+                <p><strong>學號:</strong> {{ student.student_id }}</p>
+                {% endif %}
+                {% if student.email %}
+                <p><strong>電子郵件:</strong> {{ student.email }}</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 學習偏好 -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #e74c3c;">
+            <h4 style="color: #2c3e50; margin-bottom: 15px;">🎨 學習偏好</h4>
+            <div>
+                <p><strong>語言偏好:</strong> 
+                <span class="status-tag {{ 'status-active' if student.language_preference == 'english' else 'status-moderate' if student.language_preference == 'chinese' else 'status-inactive' }}">
+                    {% if student.language_preference == 'english' %}🇺🇸 英文為主
+                    {% elif student.language_preference == 'chinese' %}🇹🇼 中文為主
+                    {% else %}🌐 中英混合{% endif %}
+                </span>
+                </p>
+                
+                {% if student.learning_style %}
+                <p style="margin-top: 8px;"><strong>學習風格:</strong> {{ student.learning_style }}</p>
+                {% endif %}
+                
+                {% if student.interest_areas %}
+                <p style="margin-top: 8px;"><strong>興趣領域:</strong></p>
+                <div style="margin-top: 5px;">{{ student.interest_areas[:100] }}{% if student.interest_areas|length > 100 %}...{% endif %}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 活動狀態 -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #27ae60;">
+            <h4 style="color: #2c3e50; margin-bottom: 15px;">📊 活動狀態</h4>
+            <div>
+                {% if student.last_active %}
+                <p><strong>最後活動:</strong><br>
+                   <span style="color: #27ae60;">{{ student.last_active.strftime('%Y年%m月%d日 %H:%M') }}</span>
+                </p>
+                <p style="margin-top: 8px;"><strong>活動間隔:</strong> 
+                {% set days_ago = (now() - student.last_active).days %}
+                {% if days_ago == 0 %}今天
+                {% elif days_ago == 1 %}1天前
+                {% elif days_ago < 7 %}{{ days_ago }}天前
+                {% elif days_ago < 30 %}{{ (days_ago/7)|round }}週前
+                {% else %}{{ (days_ago/30)|round }}個月前
+                {% endif %}
+                </p>
+                {% else %}
+                <p style="color: #e74c3c;">尚未開始活動</p>
+                {% endif %}
+                
+                <p style="margin-top: 8px;"><strong>狀態:</strong> 
+                <span class="status-tag {{ 'status-active' if student.is_active else 'status-inactive' }}">
+                    {{ '活躍' if student.is_active else '不活躍' }}
+                </span>
+                </p>
+            </div>
+        </div>
+
+        <!-- 統計摘要 -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #f39c12;">
+            <h4 style="color: #2c3e50; margin-bottom: 15px;">📈 學習統計</h4>
+            <div>
+                <p><strong>註冊天數:</strong> {{ (now() - student.created_at).days + 1 }} 天</p>
+                <p style="margin-top: 8px;"><strong>平均每日對話:</strong> {{ "%.1f"|format(learning_summary.message_count / ((now() - student.created_at).days + 1)) }} 條</p>
+                {% if learning_summary.question_count > 0 %}
+                <p style="margin-top: 8px;"><strong>提問比例:</strong> {{ "%.1f"|format(learning_summary.question_count / learning_summary.message_count * 100) }}%</p>
+                {% endif %}
+                <p style="margin-top: 8px;"><strong>學習活躍度:</strong> 
+                {% if student.participation_rate > 80 %}
+                <span style="color: #27ae60; font-weight: bold;">非常活躍</span>
+                {% elif student.participation_rate > 50 %}
+                <span style="color: #f39c12; font-weight: bold;">適度活躍</span>
+                {% elif student.participation_rate > 20 %}
+                <span style="color: #e67e22; font-weight: bold;">輕度參與</span>
+                {% else %}
+                <span style="color: #e74c3c; font-weight: bold;">需要鼓勵</span>
+                {% endif %}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 即時學習摘要 -->
+<div class="content-section" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+    <h2 class="section-title" style="color: white; border-bottom-color: rgba(255,255,255,0.3);">
+        🧠 AI學習摘要分析
+        <span style="font-size: 0.7em; font-weight: normal; opacity: 0.8;">
+            {{ learning_summary.summary_type }} | {{ learning_summary.actual_length }}/{{ learning_summary.target_length }}字 | 即時生成
+        </span>
+    </h2>
+    
+    <div style="background: rgba(255,255,255,0.1); padding: 25px; border-radius: 12px; backdrop-filter: blur(10px);">
+        <div style="font-size: 1.1em; line-height: 1.8; margin-bottom: 20px;">
+            {{ learning_summary.summary }}
+        </div>
+        
+        {% if learning_summary.topics %}
+        <div style="margin-bottom: 20px;">
+            <h4 style="margin-bottom: 12px; opacity: 0.9;">🎯 主要學習主題：</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                {% for topic in learning_summary.topics %}
+                <span style="background: rgba(255,255,255,0.2); padding: 6px 15px; border-radius: 20px; font-size: 0.9em; backdrop-filter: blur(5px);">
+                    {{ topic }}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; opacity: 0.8; font-size: 0.85em;">
+            <span>📊 基於 {{ learning_summary.message_count }} 條對話記錄分析</span>
+            <span>🕒 {{ learning_summary.generated_at[:19].replace('T', ' ') }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- 學習進度視覺化 -->
+<div class="content-section">
+    <h2 class="section-title">📈 學習進度分析</h2>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+        <!-- 參與度進度條 -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+            <h4 style="margin-bottom: 15px; color: #2c3e50;">🎯 參與度指標</h4>
+            <div style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>整體參與度</span>
+                    <span style="font-weight: bold; color: #3498db;">{{ "%.1f"|format(student.participation_rate) }}%</span>
+                </div>
+                <div style="background: #e9ecef; height: 8px; border-radius: 4px; margin-top: 5px;">
+                    <div style="background: linear-gradient(90deg, #3498db, #2ecc71); height: 100%; width: {{ student.participation_rate }}%; border-radius: 4px; transition: width 0.5s ease;"></div>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>提問積極度</span>
+                    {% set question_rate = (learning_summary.question_count / learning_summary.message_count * 100) if learning_summary.message_count > 0 else 0 %}
+                    <span style="font-weight: bold; color: #e74c3c;">{{ "%.1f"|format(question_rate) }}%</span>
+                </div>
+                <div style="background: #e9ecef; height: 8px; border-radius: 4px; margin-top: 5px;">
+                    <div style="background: linear-gradient(90deg, #e74c3c, #f39c12); height: 100%; width: {{ question_rate }}%; border-radius: 4px; transition: width 0.5s ease;"></div>
+                </div>
+            </div>
+            
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>持續性</span>
+                    {% set consistency = min(100, (learning_summary.message_count / ((now() - student.created_at).days + 1)) * 20) %}
+                    <span style="font-weight: bold; color: #9b59b6;">{{ "%.1f"|format(consistency) }}%</span>
+                </div>
+                <div style="background: #e9ecef; height: 8px; border-radius: 4px; margin-top: 5px;">
+                    <div style="background: linear-gradient(90deg, #9b59b6, #e91e63); height: 100%; width: {{ consistency }}%; border-radius: 4px; transition: width 0.5s ease;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 學習特徵雷達圖 (簡化版) -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+            <h4 style="margin-bottom: 15px; color: #2c3e50;">🎨 學習特徵分析</h4>
+            
+            {% set engagement_score = min(100, student.participation_rate) %}
+            {% set curiosity_score = min(100, question_rate * 2) %}
+            {% set consistency_score = min(100, consistency) %}
+            {% set topic_diversity = min(100, learning_summary.topics|length * 20) %}
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; margin-bottom: 5px;">
+                        {% if engagement_score > 80 %}🔥
+                        {% elif engagement_score > 60 %}🌟
+                        {% elif engagement_score > 40 %}💫
+                        {% else %}🌱
+                        {% endif %}
+                    </div>
+                    <div style="font-size: 0.9em; color: #7f8c8d;">參與熱忱</div>
+                    <div style="font-weight: bold; color: #3498db;">{{ "%.0f"|format(engagement_score) }}分</div>
+                </div>
+                
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; margin-bottom: 5px;">
+                        {% if curiosity_score > 80 %}🤔
+                        {% elif curiosity_score > 60 %}❓
+                        {% elif curiosity_score > 40 %}💭
+                        {% else %}😶
+                        {% endif %}
+                    </div>
+                    <div style="font-size: 0.9em; color: #7f8c8d;">求知慾</div>
+                    <div style="font-weight: bold; color: #e74c3c;">{{ "%.0f"|format(curiosity_score) }}分</div>
+                </div>
+                
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; margin-bottom: 5px;">
+                        {% if consistency_score > 80 %}⚡
+                        {% elif consistency_score > 60 %}🔄
+                        {% elif consistency_score > 40 %}📈
+                        {% else %}🐌
+                        {% endif %}
+                    </div>
+                    <div style="font-size: 0.9em; color: #7f8c8d;">學習頻率</div>
+                    <div style="font-weight: bold; color: #9b59b6;">{{ "%.0f"|format(consistency_score) }}分</div>
+                </div>
+                
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; margin-bottom: 5px;">
+                        {% if topic_diversity > 80 %}🌈
+                        {% elif topic_diversity > 60 %}🎯
+                        {% elif topic_diversity > 40 %}📚
+                        {% else %}📖
+                        {% endif %}
+                    </div>
+                    <div style="font-size: 0.9em; color: #7f8c8d;">主題廣度</div>
+                    <div style="font-weight: bold; color: #f39c12;">{{ "%.0f"|format(topic_diversity) }}分</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 對話記錄區域 -->
+<div class="content-section" id="messages">
+    <h2 class="section-title">
+        💬 對話記錄
+        <span style="font-size: 0.7em; color: #7f8c8d; font-weight: normal;">
+            最近 {{ messages|length }} 條對話 | 支援8次記憶AI回應
+        </span>
+    </h2>
+    
+    {% if messages %}
+    <div class="message-list">
+        {% for message in messages %}
+        <div class="message-item {{ 'message-question' if message.message_type == 'question' or '?' in message.content }}">
+            <div class="message-timestamp">
+                <span>🕒 {{ message.timestamp.strftime('%m月%d日 %H:%M') }}</span>
+                {% if message.message_type == 'question' or '?' in message.content %}
+                <span style="background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 12px; font-size: 0.8em;">
+                    ❓ 問題
+                </span>
+                {% else %}
+                <span style="background: #cce5ff; color: #004085; padding: 2px 8px; border-radius: 12px; font-size: 0.8em;">
+                    💬 陳述
+                </span>
+                {% endif %}
+                
+                {% if message.topic_category %}
+                <span style="background: #f0f0f0; color: #666; padding: 2px 8px; border-radius: 12px; font-size: 0.75em;">
+                    🏷️ {{ message.topic_category }}
+                </span>
+                {% endif %}
+            </div>
+            
+            <div class="message-content">
+                {{ message.content }}
+            </div>
+            
+            {% if message.sentiment or message.complexity_score %}
+            <div style="margin-top: 8px; font-size: 0.8em; color: #7f8c8d; display: flex; gap: 15px;">
+                {% if message.sentiment %}
+                <span>😊 情感: {{ message.sentiment }}</span>
+                {% endif %}
+                {% if message.complexity_score %}
+                <span>🧠 複雜度: {{ "%.1f"|format(message.complexity_score) }}</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    
+    {% if messages|length >= 50 %}
+    <div style="text-align: center; margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <p style="color: #7f8c8d; margin-bottom: 10px;">
+            📋 顯示最近50條對話記錄，完整記錄請匯出檔案查看
+        </p>
+        <a href="/students/{{ student.id }}/export" class="btn btn-primary">
+            💾 匯出完整對話記錄
+        </a>
+    </div>
+    {% endif %}
+    
+    {% else %}
+    <div class="empty-state">
+        <h3>💬 尚無對話記錄</h3>
+        <p>這位學生還沒有開始與AI助理的對話。</p>
+        <p style="margin-top: 10px; font-size: 0.9em; color: #7f8c8d;">
+            學生可以透過LINE Bot發送訊息開始學習對話。
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 教學建議區域 -->
+<div class="content-section" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); color: #2c3e50;">
+    <h2 class="section-title" style="color: #2c3e50; border-bottom-color: rgba(44,62,80,0.3);">
+        💡 個人化教學建議
+    </h2>
+    
+    <div style="background: rgba(255,255,255,0.8); padding: 25px; border-radius: 12px; backdrop-filter: blur(10px);">
+        {% if student.participation_rate > 80 %}
+        <div style="margin-bottom: 20px;">
+            <h4 style="color: #27ae60; margin-bottom: 10px;">🌟 優秀表現</h4>
+            <p>{{ student.name }} 展現出色的學習參與度！建議：</p>
+            <ul style="margin-top: 10px; padding-left: 20px;">
+                <li>提供更具挑戰性的進階主題討論</li>
+                <li>鼓勵同儕指導和知識分享</li>
+                <li>增加跨文化交流機會</li>
+            </ul>
+        </div>
+        {% elif student.participation_rate > 50 %}
+        <div style="margin-bottom: 20px;">
+            <h4 style="color: #f39c12; margin-bottom: 10px;">📈 穩定發展</h4>
+            <p>{{ student.name }} 保持良好的學習節奏。建議：</p>
+            <ul style="margin-top: 10px; padding-left: 20px;">
+                <li>定期鼓勵和正面回饋</li>
+                <li>提供多樣化的學習話題</li>
+                <li>適度增加互動頻率</li>
+            </ul>
+        </div>
+        {% else %}
+        <div style="margin-bottom: 20px;">
+            <h4 style="color: #e74c3c; margin-bottom: 10px;">🎯 需要關注</h4>
+            <p>{{ student.name }} 可能需要額外的學習支援。建議：</p>
+            <ul style="margin-top: 10px; padding-left: 20px;">
+                <li>主動關懷並了解學習困難</li>
+                <li>提供基礎友善的學習材料</li>
+                <li>建立定期check-in機制</li>
+            </ul>
+        </div>
+        {% endif %}
+        
+        {% if learning_summary.topics|length > 3 %}
+        <div style="margin-bottom: 20px;">
+            <h4 style="color: #3498db; margin-bottom: 10px;">🎨 多元興趣</h4>
+            <p>學生展現對多個主題的興趣，建議整合跨領域學習方案。</p>
+        </div>
+        {% endif %}
+        
+        {% if question_rate > 40 %}
+        <div>
+            <h4 style="color: #9b59b6; margin-bottom: 10px;">🤔 積極提問者</h4>
+            <p>高提問率顯示強烈求知慾，建議提供深度解答和延伸閱讀材料。</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* 學生詳情頁專用樣式 */
+    .progress-ring {
+        transform: rotate(-90deg);
+    }
+    
+    .progress-ring__circle {
+        transition: stroke-dasharray 0.35s;
+        transform: rotate(-90deg);
+        transform-origin: 50% 50%;
+    }
+    
+    /* 動畫效果 */
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(30px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    .content-section {
+        animation: fadeInUp 0.6s ease-out;
+        animation-fill-mode: both;
+    }
+    
+    .content-section:nth-child(1) { animation-delay: 0.1s; }
+    .content-section:nth-child(2) { animation-delay: 0.2s; }
+    .content-section:nth-child(3) { animation-delay: 0.3s; }
+    .content-section:nth-child(4) { animation-delay: 0.4s; }
+    .content-section:nth-child(5) { animation-delay: 0.5s; }
+    
+    /* 進度條動畫 */
+    .progress-bar {
+        animation: expandWidth 1s ease-out 0.5s both;
+    }
+    
+    @keyframes expandWidth {
+        from { width: 0%; }
+    }
+    
+    /* 訊息項目懸停效果 */
+    .message-item {
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .message-item::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+        transition: left 0.5s ease;
+    }
+    
+    .message-item:hover::before {
+        left: 100%;
+    }
+    
+    /* 響應式優化 */
+    @media (max-width: 768px) {
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        
+        .nav-buttons {
+            flex-direction: column;
+            width: 100%;
+        }
+        
+        .nav-buttons .btn {
+            width: 100%;
+            margin: 5px 0;
+        }
+    }
+    
+    @media (max-width: 480px) {
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    /* 列印樣式 */
+    @media print {
+        .nav-buttons, #messages .message-list {
+            display: none;
+        }
+        
+        .content-section {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        
+        .message-item {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            margin-bottom: 5px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 學生詳情頁專用JavaScript
+    document.addEventListener('DOMContentLoaded', function() {
+        // 初始化頁面動畫
+        initPageAnimations();
+        
+        // 設置進度條動畫
+        animateProgressBars();
+        
+        // 添加平滑滾動
+        setupSmoothScrolling();
+        
+        // 初始化工具提示
+        initTooltips();
+        
+        // 設置自動刷新提示
+        setupAutoRefresh();
+    });
+
+    // 頁面動畫初始化
+    function initPageAnimations() {
+        // 統計卡片數字動畫
+        const statNumbers = document.querySelectorAll('.stat-card h3');
+        statNumbers.forEach((element, index) => {
+            const finalValue = parseInt(element.textContent) || parseFloat(element.textContent) || 0;
+            element.textContent = '0';
+            
+            setTimeout(() => {
+                animateNumber(element, 0, finalValue, 1000);
+            }, index * 200);
+        });
+        
+        // 訊息項目漸入動畫
+        const messageItems = document.querySelectorAll('.message-item');
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '0';
+                    entry.target.style.transform = 'translateX(-20px)';
+                    
+                    setTimeout(() => {
+                        entry.target.style.transition = 'all 0.5s ease';
+                        entry.target.style.opacity = '1';
+                        entry.target.style.transform = 'translateX(0)';
+                    }, 100);
+                    
+                    observer.unobserve(entry.target);
+                }
+            });
+        });
+        
+        messageItems.forEach(item => observer.observe(item));
+    }
+    
+    // 數字動畫
+    function animateNumber(element, start, end, duration) {
+        const startTime = performance.now();
+        const isFloat = end.toString().includes('.');
+        
+        function updateNumber(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            // 使用緩動函數
+            const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+            const current = start + (end - start) * easeOutQuart;
+            
+            if (isFloat) {
+                element.textContent = current.toFixed(1);
+            } else {
+                element.textContent = Math.floor(current);
+            }
+            
+            if (progress < 1) {
+                requestAnimationFrame(updateNumber);
+            } else {
+                element.textContent = isFloat ? end.toFixed(1) : end;
+            }
+        }
+        
+        requestAnimationFrame(updateNumber);
+    }
+    
+    // 進度條動畫
+    function animateProgressBars() {
+        const progressBars = document.querySelectorAll('[style*="width:"]');
+        progressBars.forEach(bar => {
+            const targetWidth = bar.style.width;
+            bar.style.width = '0%';
+            
+            setTimeout(() => {
+                bar.style.transition = 'width 1s ease-out';
+                bar.style.width = targetWidth;
+            }, 500);
+        });
+    }
+    
+    // 平滑滾動設置
+    function setupSmoothScrolling() {
+        const scrollLinks = document.querySelectorAll('a[href^="#"]');
+        scrollLinks.forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                    
+                    // 添加閃爍效果
+                    target.style.animation = 'none';
+                    setTimeout(() => {
+                        target.style.animation = 'highlight 2s ease-out';
+                    }, 10);
+                }
+            });
+        });
+    }
+    
+    // 工具提示初始化
+    function initTooltips() {
+        const tooltipElements = [
+            { selector: '.stat-card', content: '點擊查看詳細統計' },
+            { selector: '.message-question', content: '這是一個問題類型的對話' },
+            { selector: '.topic-tag', content: 'AI識別的主題標籤' },
+            { selector: '.status-tag', content: '當前狀態指標' }
+        ];
+        
+        tooltipElements.forEach(({ selector, content }) => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(el => {
+                if (!el.hasAttribute('title')) {
+                    el.setAttribute('title', content);
+                }
+            });
+        });
+    }
+    
+    // 自動刷新設置
+    function setupAutoRefresh() {
+        // 每5分鐘檢查是否需要更新摘要
+        setInterval(() => {
+            const summaryElement = document.querySelector('[style*="667eea"]');
+            if (summaryElement) {
+                const refreshIndicator = document.createElement('div');
+                refreshIndicator.innerHTML = '🔄 資料可能已更新，<a href="#" onclick="refreshSummary()" style="color: white; text-decoration: underline;">點擊重新整理</a>';
+                refreshIndicator.style.cssText = 'position: fixed; top: 20px; right: 20px; background: rgba(102, 126, 234, 0.9); color: white; padding: 10px 15px; border-radius: 8px; font-size: 0.9em; z-index: 1000; animation: slideInRight 0.5s ease;';
+                
+                document.body.appendChild(refreshIndicator);
+                
+                setTimeout(() => {
+                    refreshIndicator.remove();
+                }, 10000);
+            }
+        }, 300000); // 5分鐘
+    }
+    
+    // 重新整理摘要
+    function refreshSummary() {
+        const refreshBtn = document.querySelector('button[onclick="refreshSummary()"]');
+        if (refreshBtn) {
+            const originalText = refreshBtn.innerHTML;
+            refreshBtn.innerHTML = '<span class="loading"></span> 分析中...';
+            refreshBtn.disabled = true;
+            
+            // 模擬API呼叫
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        }
+    }
+    
+    // 複製學生資訊
+    function copyStudentInfo() {
+        const studentName = '{{ student.name }}';
+        const studentId = '{{ student.line_user_id }}';
+        const participationRate = '{{ "%.1f"|format(student.participation_rate) }}';
+        const messageCount = '{{ learning_summary.message_count }}';
+        
+        const info = `學生姓名: ${studentName}
+LINE ID: ${studentId}
+參與度: ${participationRate}%
+對話數: ${messageCount}`;
+        
+        navigator.clipboard.writeText(info).then(() => {
+            showNotification('學生資訊已複製到剪貼簿！', 'success');
+        }).catch(() => {
+            showNotification('複製失敗，請手動選取', 'error');
+        });
+    }
+    
+    // 通知系統
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            z-index: 1001;
+            animation: slideInRight 0.3s ease;
+            max-width: 300px;
+        `;
+        
+        switch(type) {
+            case 'success':
+                notification.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)';
+                break;
+            case 'error':
+                notification.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+                break;
+            default:
+                notification.style.background = 'linear-gradient(135deg, #3498db, #2980b9)';
+        }
+        
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideOutRight 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+    
+    // 匯出確認
+    function confirmExport() {
+        return confirm('確定要匯出 {{ student.name }} 的完整學習檔案嗎？這將包含所有對話記錄和分析資料。');
+    }
+    
+    // 鍵盤快捷鍵
+    document.addEventListener('keydown', function(e) {
+        // Ctrl+R 或 Cmd+R 重新整理摘要
+        if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+            e.preventDefault();
+            refreshSummary();
+        }
+        
+        // Ctrl+E 或 Cmd+E 匯出檔案
+        if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+            e.preventDefault();
+            if (confirmExport()) {
+                window.location.href = '/students/{{ student.id }}/export';
+            }
+        }
+        
+        // Ctrl+C 或 Cmd+C (在空白處) 複製學生資訊
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !window.getSelection().toString()) {
+            copyStudentInfo();
+        }
+    });
+    
+    // 添加右鍵選單
+    document.addEventListener('contextmenu', function(e) {
+        if (e.target.closest('.stat-card') || e.target.closest('.message-item')) {
+            e.preventDefault();
+            // 可以在這裡添加自定義右鍵選單
+        }
+    });
+</script>
+
+<!-- 添加CSS動畫 -->
+<style>
+    @keyframes slideInRight {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    
+    @keyframes slideOutRight {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+    }
+    
+    @keyframes highlight {
+        0%, 100% { background-color: transparent; }
+        50% { background-color: rgba(52, 152, 219, 0.1); }
+    }
+</style>
+{% endblock %}
