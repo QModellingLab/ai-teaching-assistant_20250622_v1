@@ -1856,8 +1856,8 @@ def storage_management():
 # =================== app.py 完整版 - 第 3 段修復版結束 ===================
 
 
-# =================== app.py 完整版 - 第 4 段開始（最後一段） ===================
-# 健康檢查 + 學生詳情 + 資料匯出 + LINE Bot 處理 + 程式進入點
+# =================== app.py 完整版 - 第 4 段修復版 ===================
+# 健康檢查 + 學生詳情 + 資料匯出 + LINE Bot 處理 + 程式進入點（語法錯誤修正）
 
 # =================== 增強版健康檢查功能 ===================
 
@@ -1868,6 +1868,7 @@ def enhanced_health_check():
     包含AI模型狀態、配額監控、效能指標、系統資源
     """
     try:
+        import sys
         from models import Student, Message
         
         # 基本系統資訊
@@ -1985,6 +1986,10 @@ def enhanced_health_check():
         else:
             health_data['system_status'] = 'degraded'
         
+        # 檢查JSON格式請求
+        if request.args.get('format') == 'json':
+            return jsonify(health_data)
+        
         # 返回詳細的HTML健康檢查報告
         status_colors = {
             'healthy': '#28a745',
@@ -2007,7 +2012,8 @@ def enhanced_health_check():
         overall_color = status_colors.get(health_data['system_status'], '#6c757d')
         overall_icon = status_icons.get(health_data['system_status'], '❓')
         
-        return f"""
+        # 構建完整的健康檢查HTML（修復語法錯誤）
+        health_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
@@ -2067,18 +2073,19 @@ def enhanced_health_check():
                 
                 <div class="components-grid">"""
         
-        # 生成各組件的健康檢查卡片
-        components_html = ""
+        # 生成各組件的健康檢查卡片（修復語法錯誤）
         
         # 1. 資料庫組件
         db_comp = health_data['components']['database']
-        components_html += f"""
+        health_html += f"""
                     <div class="component-card {db_comp['status']}">
                         <div class="component-header">
                             <span class="component-title">📊 資料庫系統</span>
                             <span class="status-badge status-{db_comp['status']}">{status_icons.get(db_comp['status'], '❓')} {db_comp['status'].upper()}</span>
-                        </div>
-                        {f'''
+                        </div>"""
+        
+        if db_comp['status'] == 'healthy':
+            health_html += f"""
                         <div class="metric">
                             <span>學生記錄</span>
                             <span class="metric-value">{db_comp['students_count']}</span>
@@ -2090,13 +2097,16 @@ def enhanced_health_check():
                         <div class="metric">
                             <span>最後活動</span>
                             <span class="metric-value">{db_comp['last_activity']}</span>
-                        </div>
-                        ''' if db_comp['status'] == 'healthy' else f'<p style="color: #dc3545;">錯誤: {db_comp.get("error", "Unknown error")}</p>'}
-                    </div>"""
+                        </div>"""
+        else:
+            health_html += f"""
+                        <p style="color: #dc3545;">錯誤: {db_comp.get('error', 'Unknown error')}</p>"""
+        
+        health_html += "</div>"
         
         # 2. AI模型組件
         ai_comp = health_data['components']['ai_models']
-        components_html += f"""
+        health_html += f"""
                     <div class="component-card {ai_comp['status']}">
                         <div class="component-header">
                             <span class="component-title">🤖 AI模型系統</span>
@@ -2117,21 +2127,24 @@ def enhanced_health_check():
                         <div class="metric">
                             <span>連接測試</span>
                             <span class="metric-value">{ai_comp['connection_test'][:50]}...</span>
-                        </div>
-                        
-                        {f'''
+                        </div>"""
+        
+        if ai_comp['recommendations']:
+            health_html += f"""
                         <div class="recommendations">
                             <strong>💡 AI建議:</strong>
-                            <ul>
-                        ''' + ''.join([f'<li>{rec}</li>' for rec in ai_comp['recommendations'][:2]]) + '''
+                            <ul>"""
+            for rec in ai_comp['recommendations'][:2]:
+                health_html += f"<li>{rec}</li>"
+            health_html += """
                             </ul>
-                        </div>
-                        ''' if ai_comp['recommendations'] else ''}
-                    </div>"""
+                        </div>"""
+        
+        health_html += "</div>"
         
         # 3. LINE Bot組件
         line_comp = health_data['components']['line_bot']
-        components_html += f"""
+        health_html += f"""
                     <div class="component-card {line_comp['status']}">
                         <div class="component-header">
                             <span class="component-title">💬 LINE Bot</span>
@@ -2153,7 +2166,7 @@ def enhanced_health_check():
         
         # 4. 環境變數組件
         env_comp = health_data['components']['environment']
-        components_html += f"""
+        health_html += f"""
                     <div class="component-card {env_comp['status']}">
                         <div class="component-header">
                             <span class="component-title">🔧 環境配置</span>
@@ -2162,23 +2175,23 @@ def enhanced_health_check():
         
         for var, status in env_comp['variables'].items():
             icon = '✅' if status == 'configured' else '❌'
-            components_html += f"""
+            health_html += f"""
                         <div class="metric">
                             <span>{var}</span>
                             <span class="metric-value">{icon} {status}</span>
                         </div>"""
         
         if env_comp['missing_critical']:
-            components_html += f"""
+            health_html += f"""
                         <div style="background: #fff3cd; padding: 10px; border-radius: 5px; margin-top: 10px;">
                             <strong>⚠️ 缺少關鍵環境變數:</strong> {', '.join(env_comp['missing_critical'])}
                         </div>"""
         
-        components_html += "</div>"
+        health_html += "</div>"
         
         # 5. 儲存空間組件
         storage_comp = health_data['components']['storage']
-        components_html += f"""
+        health_html += f"""
                     <div class="component-card {storage_comp['status']}">
                         <div class="component-header">
                             <span class="component-title">💾 儲存空間</span>
@@ -2195,23 +2208,25 @@ def enhanced_health_check():
                         <div class="metric">
                             <span>近期訊息</span>
                             <span class="metric-value">{storage_comp['recent_messages']}</span>
-                        </div>
-                        
-                        {f'''
+                        </div>"""
+        
+        if storage_comp['cleanup_recommended']:
+            health_html += """
                         <div style="background: #fff3cd; padding: 10px; border-radius: 5px; margin-top: 10px;">
                             <strong>⚠️ 建議清理</strong>
                             <br><a href="/storage-management" class="btn btn-warning" style="margin-top: 5px;">💾 管理儲存</a>
-                        </div>
-                        ''' if storage_comp['cleanup_recommended'] else '''
+                        </div>"""
+        else:
+            health_html += """
                         <div style="background: #d4edda; padding: 10px; border-radius: 5px; margin-top: 10px;">
                             <strong>✅ 空間充足</strong>
-                        </div>
-                        '''}
-                    </div>"""
+                        </div>"""
+        
+        health_html += "</div>"
         
         # 6. 效能組件
         perf_comp = health_data['components']['performance']
-        components_html += f"""
+        health_html += f"""
                     <div class="component-card {perf_comp['status']}">
                         <div class="component-header">
                             <span class="component-title">📈 系統效能</span>
@@ -2228,19 +2243,22 @@ def enhanced_health_check():
                         <div class="metric">
                             <span>成功率</span>
                             <span class="metric-value">{perf_comp['success_rate']}%</span>
-                        </div>
-                        
-                        {f'''
+                        </div>"""
+        
+        if perf_comp['model_distribution']:
+            health_html += """
                         <div class="model-list">
-                            <strong>模型使用分布:</strong>
-                            {chr(10).join([f'<div class="model-item">{model}: {calls} 次</div>' for model, calls in perf_comp['model_distribution'].items()])}
-                        </div>
-                        ''' if perf_comp['model_distribution'] else ''}
-                    </div>"""
+                            <strong>模型使用分布:</strong>"""
+            for model, calls in perf_comp['model_distribution'].items():
+                health_html += f"""
+                            <div class="model-item">{model}: {calls} 次</div>"""
+            health_html += "</div>"
+        
+        health_html += "</div>"
         
         # 7. 記憶系統組件
         memory_comp = health_data['components']['memory_system']
-        components_html += f"""
+        health_html += f"""
                     <div class="component-card {memory_comp['status']}">
                         <div class="component-header">
                             <span class="component-title">🧠 記憶系統</span>
@@ -2264,8 +2282,8 @@ def enhanced_health_check():
                         </div>
                     </div>"""
         
-        return f"""
-        {components_html}
+        # 結束HTML
+        health_html += f"""
                 </div>
                 
                 <div class="auto-refresh">
@@ -2279,6 +2297,8 @@ def enhanced_health_check():
         </body>
         </html>
         """
+        
+        return health_html
         
     except Exception as e:
         logger.error(f"❌ 健康檢查錯誤: {e}")
@@ -2301,48 +2321,11 @@ def enhanced_health_check():
         </div>
         """, 500
 
-# 檢查JSON格式請求
+# 檢查JSON格式請求的健康檢查路由
 @app.route('/health')
 def health_check():
     """健康檢查路由 - 支援JSON和HTML格式"""
-    if request.args.get('format') == 'json':
-        # 返回簡化的JSON格式
-        try:
-            from models import Student, Message
-            
-            ai_connected, ai_status = test_ai_connection()
-            quota_status = get_quota_status()
-            storage_stats = monitor_storage_usage()
-            
-            return jsonify({
-                'status': 'healthy' if ai_connected else 'degraded',
-                'timestamp': datetime.datetime.now().isoformat(),
-                'version': 'EMI Teaching Assistant v2.5.0',
-                'components': {
-                    'database': {
-                        'students': Student.select().count(),
-                        'messages': Message.select().count()
-                    },
-                    'ai': {
-                        'connected': ai_connected,
-                        'current_model': current_model_name,
-                        'available_models': len([m for m, info in quota_status.get('models', {}).items() if info.get('usage_percent', 100) < 100])
-                    },
-                    'storage': {
-                        'usage_mb': storage_stats.get('estimated_size_mb', 0),
-                        'health': storage_stats.get('storage_health', 'unknown')
-                    }
-                }
-            })
-        except Exception as e:
-            return jsonify({
-                'status': 'error',
-                'error': str(e),
-                'timestamp': datetime.datetime.now().isoformat()
-            }), 500
-    else:
-        # 返回詳細的HTML格式
-        return enhanced_health_check()
+    return enhanced_health_check()
 
 # =================== 學生詳情和摘要路由 ===================
 
@@ -2481,18 +2464,26 @@ def student_detail(student_id):
                 
                 <div class="card full-width">
                     <h3>💬 對話記錄 (最近8次記憶)</h3>
-                    <div class="conversation-list">
-                        {f'''
-                        {''.join([f'''
-                        <div class="message-item {'message-question' if msg.message_type == 'question' or '?' in msg.content else 'message-statement'}">
+                    <div class="conversation-list">"""
+        
+        if messages:
+            for msg in messages[:8]:
+                msg_type_class = 'message-question' if msg.message_type == 'question' or '?' in msg.content else 'message-statement'
+                msg_type_label = '❓ 問題' if msg.message_type == 'question' or '?' in msg.content else '💬 陳述'
+                timestamp_str = msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if msg.timestamp else 'Unknown time'
+                
+                student_detail_html += f"""
+                        <div class="message-item {msg_type_class}">
                             <div class="message-meta">
-                                {msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if msg.timestamp else 'Unknown time'} | 
-                                {'❓ 問題' if msg.message_type == 'question' or '?' in msg.content else '💬 陳述'}
+                                {timestamp_str} | {msg_type_label}
                             </div>
                             <div>{msg.content}</div>
-                        </div>
-                        ''' for msg in messages[:8]])}
-                        ''' if messages else '<p style="text-align: center; color: #666; padding: 20px;">尚無對話記錄</p>'}
+                        </div>"""
+        else:
+            student_detail_html += """
+                        <p style="text-align: center; color: #666; padding: 20px;">尚無對話記錄</p>"""
+        
+        student_detail_html += f"""
                     </div>
                     
                     {f'<p style="text-align: center; margin-top: 15px; color: #666;">顯示最近8次對話 (共{total_messages}次) • <a href="/api/export/student/{student_id}">下載完整記錄</a></p>' if total_messages > 8 else ''}
@@ -2501,6 +2492,8 @@ def student_detail(student_id):
         </body>
         </html>
         """
+        
+        return student_detail_html
         
     except Exception as e:
         logger.error(f"❌ 學生詳情載入錯誤: {e}")
@@ -2600,16 +2593,21 @@ def student_summary(student_id):
                         </p>
                         <p><strong>🌐 Language:</strong> {summary_data.get('language', 'English').title()}</p>
                         <p><strong>⏰ Generated:</strong> {summary_data.get('generated_at', 'Unknown')}</p>
-                    </div>
-                    
-                    {f'''
+                    </div>"""
+        
+        # 安全地添加主題標籤
+        if summary_data.get('topics'):
+            summary_html += f"""
                     <div style="margin-top: 15px;">
                         <p><strong>🎯 Learning Topics Identified:</strong></p>
-                        <div class="topics-list">
-                            {chr(10).join([f'<span class="topic-tag">{topic}</span>' for topic in summary_data.get('topics', [])])}
+                        <div class="topics-list">"""
+            for topic in summary_data.get('topics', []):
+                summary_html += f'<span class="topic-tag">{topic}</span>'
+            summary_html += """
                         </div>
-                    </div>
-                    ''' if summary_data.get('topics') else ''}
+                    </div>"""
+        
+        summary_html += f"""
                 </div>
                 
                 <div class="summary-card">
@@ -2628,12 +2626,14 @@ def student_summary(student_id):
                 <div style="text-align: center; margin-top: 20px; color: #666;">
                     <p>✨ Generated by EMI Intelligent Teaching Assistant v2.5 | 
                        English-Medium Instruction Support System | 
-                       Powered by Gemini {quota_status.get('current_generation', 'AI')}</p>
+                       Powered by Gemini AI</p>
                 </div>
             </div>
         </body>
         </html>
         """
+        
+        return summary_html
         
     except Exception as e:
         logger.error(f"❌ 學生摘要載入錯誤: {e}")
@@ -2671,13 +2671,8 @@ def export_data(export_type, student_id=None):
             
             filename = f"student_{student_id}_record_{timestamp}.txt"
             
-            # 創建字串IO對象
-            output = io.StringIO()
-            output.write(content)
-            output.seek(0)
-            
             return send_file(
-                io.BytesIO(output.getvalue().encode('utf-8')),
+                io.BytesIO(content.encode('utf-8')),
                 mimetype='text/plain',
                 as_attachment=True,
                 download_name=filename
@@ -2747,64 +2742,6 @@ END OF SUMMARY
             
             content = "\n".join(content_parts)
             filename = f"emi_complete_database_{timestamp}.txt"
-            
-            return send_file(
-                io.BytesIO(content.encode('utf-8')),
-                mimetype='text/plain',
-                as_attachment=True,
-                download_name=filename
-            )
-        
-        elif export_type == 'insights':
-            # 匯出教學洞察分析
-            from teaching_analytics import generate_class_insights, get_learning_trends
-            
-            insights = generate_class_insights()
-            trends = get_learning_trends()
-            
-            content = f"""EMI INTELLIGENT TEACHING ASSISTANT
-TEACHING INSIGHTS ANALYSIS REPORT
-{'='*60}
-
-Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-System Version: EMI Teaching Assistant v2.5.0
-
-CLASS OVERVIEW:
-- Total Students: {Student.select().count()}
-- Total Messages: {Message.select().count()}
-- Question-Oriented Students: {insights.get('question_oriented_students', 0)}%
-- Participation Rate: {insights.get('participation_rate', 0):.1f}%
-- Topic Diversity Score: {insights.get('topic_diversity', 0)}
-
-LEARNING TRENDS:
-- Weekly Activity: {trends.get('weekly_activity', 0)}
-- Weekly Trend: {'Increasing' if trends.get('weekly_trend', 0) > 0 else 'Decreasing'}
-- Question Complexity: {trends.get('question_complexity', 'Medium')}
-- Satisfaction Rate: {trends.get('satisfaction_rate', 85)}%
-
-TEACHING RECOMMENDATIONS:
-{insights.get('teaching_recommendation', 'Continue encouraging active participation and questioning.')}
-
-LEARNING CONTENT ANALYSIS:
-- Grammar & Syntax: {insights.get('topic_grammar', 25)}%
-- Vocabulary Building: {insights.get('topic_vocabulary', 20)}%
-- Academic Writing: {insights.get('topic_writing', 18)}%
-- Pronunciation: {insights.get('topic_pronunciation', 15)}%
-- Conversation Skills: {insights.get('topic_conversation', 22)}%
-
-SYSTEM PERFORMANCE:
-- AI Response Accuracy: {insights.get('ai_accuracy', 92)}%
-- Average Response Time: {insights.get('avg_response_time', 2.1):.1f} seconds
-- Model Efficiency: {insights.get('model_efficiency', 88)}%
-
-FOCUS RECOMMENDATIONS:
-Based on the analysis, recommend focusing on {insights.get('focus_area', 'Grammar & Writing')} to enhance learning outcomes.
-
-{'='*60}
-END OF INSIGHTS REPORT
-"""
-            
-            filename = f"emi_teaching_insights_{timestamp}.txt"
             
             return send_file(
                 io.BytesIO(content.encode('utf-8')),
@@ -2946,6 +2883,8 @@ def handle_message(event):
 
 if __name__ == '__main__':
     try:
+        import sys
+        
         # 檢查必要的環境變數
         missing_vars = []
         if not GEMINI_API_KEY:
@@ -2994,4 +2933,4 @@ if __name__ == '__main__':
     finally:
         logger.info("👋 EMI智能教學助理已關閉")
 
-# =================== app.py 完整版 - 第 4 段結束（全檔案完成） ===================
+# =================== app.py 完整版 - 第 4 段修復版結束（全檔案完成） ===================
