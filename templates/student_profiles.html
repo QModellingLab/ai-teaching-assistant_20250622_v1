@@ -1,0 +1,451 @@
+{% extends "base_profile.html" %}
+
+{% block title %}學生列表 - EMI智能教學助理{% endblock %}
+
+{% block page_title %}👥 學生列表管理{% endblock %}
+{% block page_subtitle %}Student Profile Management - 完整學習歷程追蹤{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+    <a href="/">🏠 首頁</a>
+    <span>›</span>
+    <a href="/admin">⚙️ 管理後台</a>
+    <span>›</span>
+    <span>👥 學生列表</span>
+</nav>
+{% endblock %}
+
+{% block nav_buttons %}
+<a href="/" class="btn btn-secondary">🏠 首頁</a>
+<a href="/admin" class="btn btn-primary">⚙️ 管理後台</a>
+<a href="/students/export" class="btn btn-export">📊 匯出清單</a>
+<a href="/health" class="btn btn-secondary">🏥 系統檢查</a>
+{% endblock %}
+
+{% block stats_section %}
+<div class="stats-grid">
+    <div class="stat-card blue">
+        <h3>{{ total_students }}</h3>
+        <p>📚 總學生數</p>
+    </div>
+    <div class="stat-card green">
+        <h3>{{ active_students }}</h3>
+        <p>🔥 活躍學生</p>
+    </div>
+    <div class="stat-card orange">
+        <h3>{{ total_messages }}</h3>
+        <p>💬 總對話數</p>
+    </div>
+    <div class="stat-card purple">
+        <h3>{{ average_participation|round(1) }}%</h3>
+        <p>📈 平均參與度</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block main_content %}
+<!-- 搜尋與篩選區域 -->
+<div class="search-container">
+    <form method="GET" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <input type="text" 
+               name="search" 
+               value="{{ search or '' }}" 
+               placeholder="🔍 搜尋學生姓名、LINE ID 或學號..." 
+               class="search-box"
+               style="flex: 1; min-width: 300px;">
+        
+        <select name="activity" class="search-box" style="width: auto; min-width: 150px;">
+            <option value="">全部活動狀態</option>
+            <option value="active" {{ 'selected' if activity_filter == 'active' }}>活躍學生</option>
+            <option value="moderate" {{ 'selected' if activity_filter == 'moderate' }}>適度活動</option>
+            <option value="inactive" {{ 'selected' if activity_filter == 'inactive' }}>較少活動</option>
+        </select>
+        
+        <select name="sort" class="search-box" style="width: auto; min-width: 150px;">
+            <option value="last_active" {{ 'selected' if sort_by == 'last_active' }}>最後活動時間</option>
+            <option value="message_count" {{ 'selected' if sort_by == 'message_count' }}>對話數量</option>
+            <option value="participation" {{ 'selected' if sort_by == 'participation' }}>參與度</option>
+            <option value="created_at" {{ 'selected' if sort_by == 'created_at' }}>註冊時間</option>
+        </select>
+        
+        <button type="submit" class="btn btn-primary">🔍 搜尋</button>
+        
+        {% if search or activity_filter or sort_by != 'last_active' %}
+        <a href="/students" class="btn btn-secondary">🗑️ 清除篩選</a>
+        {% endif %}
+    </form>
+</div>
+
+<!-- 學生列表 -->
+<div class="content-section">
+    <h2 class="section-title">
+        📋 學生清單
+        <span style="font-size: 0.7em; color: #7f8c8d; font-weight: normal;">
+            {% if search %}
+            搜尋「{{ search }}」的結果 ({{ student_stats|length }} 位學生)
+            {% else %}
+            共 {{ student_stats|length }} 位學生
+            {% endif %}
+        </span>
+    </h2>
+
+    {% if student_stats %}
+    <!-- 學生卡片網格 -->
+    <div class="item-grid">
+        {% for item in student_stats %}
+        <div class="item-card">
+            <!-- 學生基本資訊 -->
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px;">
+                <div>
+                    <h3 style="color: #2c3e50; margin-bottom: 5px; font-size: 1.1em;">
+                        {{ item.student.name }}
+                    </h3>
+                    <p style="color: #7f8c8d; font-size: 0.85em; margin-bottom: 3px;">
+                        📱 LINE ID: {{ item.student.line_user_id[:25] }}{% if item.student.line_user_id|length > 25 %}...{% endif %}
+                    </p>
+                    {% if item.student.student_id %}
+                    <p style="color: #7f8c8d; font-size: 0.85em;">
+                        🎓 學號: {{ item.student.student_id }}
+                    </p>
+                    {% endif %}
+                </div>
+                
+                <!-- 活動狀態標籤 -->
+                <span class="status-tag {{ 'status-active' if item.activity_status == '活躍' else 'status-moderate' if item.activity_status == '適度活動' else 'status-inactive' }}">
+                    {{ item.activity_status }}
+                </span>
+            </div>
+
+            <!-- 學習統計 -->
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 15px;">
+                <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px;">
+                    <div style="font-size: 1.3em; font-weight: bold; color: #3498db;">{{ item.message_count }}</div>
+                    <div style="font-size: 0.8em; color: #7f8c8d;">💬 對話數</div>
+                </div>
+                <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px;">
+                    <div style="font-size: 1.3em; font-weight: bold; color: #e74c3c;">{{ "%.1f"|format(item.student.participation_rate) }}%</div>
+                    <div style="font-size: 0.8em; color: #7f8c8d;">📈 參與度</div>
+                </div>
+            </div>
+
+            <!-- 最後活動時間 -->
+            {% if item.last_message_time %}
+            <div style="background: #e8f5e8; padding: 8px; border-radius: 6px; margin-bottom: 15px;">
+                <div style="font-size: 0.85em; color: #27ae60; display: flex; align-items: center; gap: 8px;">
+                    <span>🕒</span>
+                    <span>最後活動: {{ item.last_message_time.strftime('%m月%d日 %H:%M') }}</span>
+                </div>
+            </div>
+            {% else %}
+            <div style="background: #fff3cd; padding: 8px; border-radius: 6px; margin-bottom: 15px;">
+                <div style="font-size: 0.85em; color: #856404; display: flex; align-items: center; gap: 8px;">
+                    <span>⏳</span>
+                    <span>尚未開始對話</span>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- 學習特徵標籤 -->
+            <div style="margin-bottom: 15px;">
+                {% if item.student.participation_rate > 80 %}
+                <span class="topic-tag" style="background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);">高度參與</span>
+                {% elif item.student.participation_rate > 50 %}
+                <span class="topic-tag" style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);">適度參與</span>
+                {% endif %}
+
+                {% if item.message_count > 20 %}
+                <span class="topic-tag" style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);">活躍討論</span>
+                {% elif item.message_count > 10 %}
+                <span class="topic-tag" style="background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);">穩定參與</span>
+                {% endif %}
+
+                {% if item.student.language_preference == 'english' %}
+                <span class="topic-tag" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">英文主導</span>
+                {% elif item.student.language_preference == 'chinese' %}
+                <span class="topic-tag" style="background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);">中文主導</span>
+                {% endif %}
+            </div>
+
+            <!-- 操作按鈕 -->
+            <div style="display: flex; gap: 10px;">
+                <a href="/students/{{ item.student.id }}" 
+                   class="btn btn-primary" 
+                   style="flex: 1; text-align: center; font-size: 0.85em;">
+                    📝 查看詳情
+                </a>
+                <a href="/students/{{ item.student.id }}/export" 
+                   class="btn btn-export" 
+                   style="font-size: 0.85em;">
+                    💾 匯出
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- 分頁功能 (如果需要) -->
+    {% if total_pages > 1 %}
+    <div style="display: flex; justify-content: center; margin-top: 30px; gap: 10px;">
+        {% if current_page > 1 %}
+        <a href="?page={{ current_page - 1 }}{% if search %}&search={{ search }}{% endif %}{% if activity_filter %}&activity={{ activity_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}" 
+           class="btn btn-secondary">← 上一頁</a>
+        {% endif %}
+        
+        <span style="display: flex; align-items: center; color: #7f8c8d;">
+            第 {{ current_page }} 頁，共 {{ total_pages }} 頁
+        </span>
+        
+        {% if current_page < total_pages %}
+        <a href="?page={{ current_page + 1 }}{% if search %}&search={{ search }}{% endif %}{% if activity_filter %}&activity={{ activity_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}" 
+           class="btn btn-secondary">下一頁 →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <!-- 空狀態 -->
+    <div class="empty-state">
+        {% if search %}
+        <h3>🔍 找不到符合條件的學生</h3>
+        <p>沒有學生符合搜尋條件「{{ search }}」</p>
+        <div style="margin-top: 20px;">
+            <a href="/students" class="btn btn-primary">🗑️ 清除搜尋條件</a>
+        </div>
+        {% else %}
+        <h3>📚 還沒有學生資料</h3>
+        <p>目前系統中還沒有學生註冊使用。</p>
+        <p style="margin-top: 10px; font-size: 0.9em;">
+            學生可以透過 LINE Bot 開始對話來自動註冊到系統中。
+        </p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- 快速操作區域 -->
+<div class="content-section">
+    <h2 class="section-title">⚡ 快速操作</h2>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+        <!-- 匯出功能 -->
+        <div style="background: #e8f5e8; padding: 20px; border-radius: 8px;">
+            <h4 style="color: #27ae60; margin-bottom: 10px;">📊 資料匯出</h4>
+            <p style="font-size: 0.9em; color: #666; margin-bottom: 15px;">
+                匯出所有學生的基本資料和統計資訊
+            </p>
+            <a href="/students/export" class="btn btn-success" style="width: 100%;">
+                📋 匯出 TSV 清單
+            </a>
+        </div>
+
+        <!-- 系統狀態 -->
+        <div style="background: #e3f2fd; padding: 20px; border-radius: 8px;">
+            <h4 style="color: #1976d2; margin-bottom: 10px;">🏥 系統狀態</h4>
+            <p style="font-size: 0.9em; color: #666; margin-bottom: 15px;">
+                檢查系統運行狀態和資料庫連接
+            </p>
+            <a href="/health" class="btn btn-primary" style="width: 100%;">
+                🔧 系統檢查
+            </a>
+        </div>
+
+        <!-- 管理功能 -->
+        <div style="background: #fff3e0; padding: 20px; border-radius: 8px;">
+            <h4 style="color: #f57c00; margin-bottom: 10px;">⚙️ 系統管理</h4>
+            <p style="font-size: 0.9em; color: #666; margin-bottom: 15px;">
+                訪問完整的管理後台功能
+            </p>
+            <a href="/admin" class="btn btn-export" style="width: 100%;">
+                🛠️ 管理後台
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* 學生列表專用樣式 */
+    .item-card {
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .item-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 4px;
+        height: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        transform: scaleY(0);
+        transition: transform 0.3s ease;
+    }
+
+    .item-card:hover::before {
+        transform: scaleY(1);
+    }
+
+    .item-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    }
+
+    /* 搜尋框動畫 */
+    .search-box:focus {
+        transform: scale(1.02);
+        box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+    }
+
+    /* 響應式調整 */
+    @media (max-width: 768px) {
+        .item-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .search-container form {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        
+        .search-box {
+            min-width: auto !important;
+            width: 100% !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 學生列表專用JavaScript
+    document.addEventListener('DOMContentLoaded', function() {
+        // 即時搜尋功能
+        const searchInput = document.querySelector('input[name="search"]');
+        let searchTimeout;
+        
+        if (searchInput) {
+            searchInput.addEventListener('input', function() {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    // 可以在這裡實現即時搜尋
+                    console.log('搜尋:', this.value);
+                }, 300);
+            });
+        }
+
+        // 添加載入效果到匯出按鈕
+        const exportButtons = document.querySelectorAll('a[href*="/export"]');
+        exportButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const original = this.innerHTML;
+                this.innerHTML = '<span class="loading"></span> 匯出中...';
+                
+                // 5秒後恢復原狀 (防止使用者重複點擊)
+                setTimeout(() => {
+                    this.innerHTML = original;
+                }, 5000);
+            });
+        });
+
+        // 統計卡片動畫
+        const statCards = document.querySelectorAll('.stat-card');
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '0';
+                    entry.target.style.transform = 'translateY(20px)';
+                    
+                    setTimeout(() => {
+                        entry.target.style.transition = 'all 0.6s ease';
+                        entry.target.style.opacity = '1';
+                        entry.target.style.transform = 'translateY(0)';
+                    }, Math.random() * 200);
+                }
+            });
+        }, observerOptions);
+
+        statCards.forEach(card => {
+            observer.observe(card);
+        });
+
+        // 學生卡片懸停效果增強
+        const studentCards = document.querySelectorAll('.item-card');
+        studentCards.forEach(card => {
+            card.addEventListener('mouseenter', function() {
+                this.style.zIndex = '10';
+            });
+            
+            card.addEventListener('mouseleave', function() {
+                this.style.zIndex = '1';
+            });
+        });
+
+        // 篩選器變更時自動提交
+        const filterSelects = document.querySelectorAll('select[name="activity"], select[name="sort"]');
+        filterSelects.forEach(select => {
+            select.addEventListener('change', function() {
+                // 自動提交表單
+                this.closest('form').submit();
+            });
+        });
+
+        // 鍵盤快捷鍵
+        document.addEventListener('keydown', function(e) {
+            // Ctrl+K 或 Cmd+K 聚焦搜尋框
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                const searchBox = document.querySelector('.search-box');
+                if (searchBox) {
+                    searchBox.focus();
+                    searchBox.select();
+                }
+            }
+        });
+
+        // 顯示搜尋提示
+        const searchBox = document.querySelector('input[name="search"]');
+        if (searchBox) {
+            searchBox.setAttribute('title', '提示：使用 Ctrl+K 快速聚焦搜尋框');
+        }
+    });
+
+    // 確認匯出功能
+    function confirmExport(type) {
+        return confirm(`確定要匯出${type}嗎？這可能需要一些時間來處理。`);
+    }
+
+    // 批量操作功能 (未來擴展用)
+    function toggleSelectAll() {
+        const checkboxes = document.querySelectorAll('input[type="checkbox"][name="student_ids"]');
+        const selectAll = document.querySelector('#select-all');
+        
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = selectAll.checked;
+        });
+        
+        updateBatchActions();
+    }
+
+    function updateBatchActions() {
+        const checked = document.querySelectorAll('input[type="checkbox"][name="student_ids"]:checked');
+        const batchActions = document.querySelector('.batch-actions');
+        
+        if (batchActions) {
+            batchActions.style.display = checked.length > 0 ? 'block' : 'none';
+            
+            const countElement = document.querySelector('.selected-count');
+            if (countElement) {
+                countElement.textContent = checked.length;
+            }
+        }
+    }
+</script>
+{% endblock %}
