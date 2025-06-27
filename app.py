@@ -1516,7 +1516,7 @@ def student_detail(student_id):
         if messages:
             first_interaction = messages[-1].timestamp.strftime('%Y-%m-%d') if messages[-1].timestamp else 'Unknown'
             last_interaction = messages[0].timestamp.strftime('%Y-%m-%d') if messages[0].timestamp else 'Unknown'
-            days_active = (messages[0].timestamp - messages[-1].timestamp).days if len(messages) &gt; 1 and messages[0].timestamp and messages[-1].timestamp else 0
+            days_active = (messages[0].timestamp - messages[-1].timestamp).days if len(messages) > 1 and messages[0].timestamp and messages[-1].timestamp else 0
         else:
             first_interaction = last_interaction = 'No interactions'
             days_active = 0
