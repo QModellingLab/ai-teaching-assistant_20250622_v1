@@ -1657,7 +1657,7 @@ def student_detail(student_id):
         return_html += f"""
                     &lt;/div&gt;
                     
-                    {f'&lt;p style="text-align: center; margin-top: 15px; color: #666;"&gt;顯示最近8次對話 (共{total_messages}次) • &lt;a href="/api/export/student/{student_id}"&gt;下載完整記錄&lt;/a&gt;&lt;/p&gt;' if total_messages &gt; 8 else ''}
+                    f'<p style="text-align: center; margin-top: 15px; color: #666;">顯示最近8次對話 (共{total_messages}次) • <a href="/api/export/student/{student_id}">下載完整記錄</a></p>' if total_messages > 8 else ''
                 &lt;/div&gt;
             &lt;/div&gt;
         &lt;/body&gt;
