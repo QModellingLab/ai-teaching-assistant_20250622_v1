@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 # =================== 環境變數配置 ===================
 
 # LINE Bot 設定
-CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
-CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
+CHANNEL_ACCESS_TOKEN = os.getenv('CHANNEL_ACCESS_TOKEN') or os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+CHANNEL_SECRET = os.getenv('CHANNEL_SECRET') or os.getenv('LINE_CHANNEL_SECRET')
 
 # Gemini AI 設定
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
@@ -42,16 +42,29 @@ HOST = os.getenv('HOST', '0.0.0.0')
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
-# LINE Bot API 初始化
-line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
-handler = WebhookHandler(CHANNEL_SECRET) if CHANNEL_SECRET else None
-
-# Gemini AI 初始化
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    logger.info("✅ Gemini AI 已成功配置")
+# LINE Bot API 初始化 - 添加更詳細的日誌
+if CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET:
+    line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+    handler = WebhookHandler(CHANNEL_SECRET)
+    logger.info("✅ LINE Bot 服務已成功初始化")
+    logger.info(f"🔑 使用 Access Token: {CHANNEL_ACCESS_TOKEN[:20]}...")
 else:
-    logger.warning("⚠️ 未找到 GEMINI_API_KEY，AI 功能將無法使用")
+    line_bot_api = None
+    handler = None
+    logger.error("❌ LINE Bot 初始化失敗：缺少必要的環境變數")
+    logger.error("🔧 請設定：CHANNEL_ACCESS_TOKEN 和 CHANNEL_SECRET")
+
+# Gemini AI 初始化 - 添加更詳細的日誌
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        logger.info("✅ Gemini AI 已成功配置")
+        logger.info(f"🔑 使用 API Key: {GEMINI_API_KEY[:20]}...")
+    except Exception as e:
+        logger.error(f"❌ Gemini AI 配置失敗: {e}")
+else:
+    logger.error("❌ Gemini AI 初始化失敗：缺少 GEMINI_API_KEY")
+    logger.error("🔧 請設定：GEMINI_API_KEY 環境變數")
 
 # =================== 模型配置 ===================
 
