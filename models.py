@@ -1,6 +1,6 @@
 # models.py - 完整修復版本
 # EMI智能教學助理系統 - 資料模型定義
-# 修復遞迴錯誤、保留所有原有功能
+# 修復 'Student' object has no attribute 'grade' 錯誤
 # 更新日期：2025年6月27日
 
 import os
@@ -30,12 +30,15 @@ class BaseModel(Model):
 # =================== 學生模型 ===================
 
 class Student(BaseModel):
-    """學生資料模型 - 修復遞迴錯誤版本"""
+    """學生資料模型 - 修復版本，包含所有必要欄位"""
     
     # 基本資料
     id = AutoField(primary_key=True)
     name = CharField(max_length=100, default='', verbose_name="姓名")
     line_user_id = CharField(max_length=100, unique=True, verbose_name="LINE用戶ID")
+    
+    # ✅ 修復：添加缺少的 grade 欄位
+    grade = CharField(max_length=20, null=True, default=None, verbose_name="年級")
     
     # 學習統計
     participation_rate = FloatField(default=0.0, verbose_name="參與度")
@@ -65,7 +68,7 @@ class Student(BaseModel):
     def __str__(self):
         return f"Student({self.name}, {self.line_user_id})"
     
-    # =================== 查詢方法 (修復遞迴錯誤) ===================
+    # =================== 查詢方法 ===================
     
     @classmethod
     def get_by_line_id(cls, line_user_id):
@@ -78,9 +81,8 @@ class Student(BaseModel):
     
     @classmethod
     def get_by_id(cls, student_id):
-        """根據 ID 取得學生 - 修復遞迴錯誤"""
+        """根據 ID 取得學生"""
         try:
-            # ✅ 修復：使用 select().where() 避免遞迴調用
             return cls.select().where(cls.id == student_id).get()
         except cls.DoesNotExist:
             logger.warning(f"找不到 ID: {student_id} 的學生")
@@ -99,6 +101,7 @@ class Student(BaseModel):
             student = cls.create(
                 name=display_name,
                 line_user_id=line_user_id,
+                grade=None,  # ✅ 明確設定 grade 為 None
                 participation_rate=0.0,
                 question_count=0,
                 message_count=0,
@@ -148,6 +151,8 @@ class Student(BaseModel):
                 # 計算提問率
                 if self.message_count > 0:
                     self.question_rate = (self.question_count / self.message_count) * 100
+                else:
+                    self.question_rate = 0.0
             
             # 更新參與度 (簡單演算法)
             if self.message_count > 0:
@@ -447,14 +452,15 @@ class Analysis(BaseModel):
 # =================== AI 回應模型 ===================
 
 class AIResponse(BaseModel):
-    """AI回應記錄模型"""
+    """AI 回應記錄模型"""
     
     id = AutoField(primary_key=True)
     student = ForeignKeyField(Student, backref='ai_responses', verbose_name="學生")
-    query = TextField(verbose_name="用戶查詢")
-    response = TextField(verbose_name="AI回應")
+    user_input = TextField(verbose_name="用戶輸入")
+    ai_response = TextField(verbose_name="AI回應")
     
-    # AI 相關資料
+    # 技術資料
+    model_used = CharField(max_length=50, default='gemini', verbose_name="使用模型")
     response_type = CharField(max_length=20, default='gemini', verbose_name="回應類型")
     model_version = CharField(max_length=50, null=True, verbose_name="模型版本")
     processing_time = FloatField(null=True, verbose_name="處理時間(秒)")
@@ -484,16 +490,6 @@ class AIResponse(BaseModel):
     
     def __str__(self):
         return f"AIResponse({self.student.name}, {self.response_type}, {self.timestamp})"
-    
-    @property
-    def is_demo_response(self):
-        """檢查是否為演示回應"""
-        return self.student.is_demo_student
-    
-    @property
-    def is_real_response(self):
-        """檢查是否為真實回應"""
-        return not self.is_demo_response
 
 # =================== 資料庫初始化 ===================
 
@@ -524,15 +520,55 @@ def close_db():
     except Exception as e:
         logger.error(f"❌ 關閉資料庫連接失敗: {e}")
 
+# =================== 資料庫遷移功能 ===================
+
+def migrate_database():
+    """資料庫遷移 - 添加缺少的欄位"""
+    try:
+        # 檢查並添加 grade 欄位
+        try:
+            # 嘗試執行 ALTER TABLE 添加 grade 欄位
+            if isinstance(db, SqliteDatabase):
+                # SQLite 的 ALTER TABLE 限制較多，需要特殊處理
+                db.execute_sql('ALTER TABLE students ADD COLUMN grade VARCHAR(20)')
+            else:
+                # PostgreSQL 支援標準 ALTER TABLE
+                db.execute_sql('ALTER TABLE students ADD COLUMN grade VARCHAR(20)')
+            
+            logger.info("✅ 成功添加 grade 欄位")
+        except Exception as e:
+            if 'duplicate column name' in str(e).lower() or 'already exists' in str(e).lower():
+                logger.info("✅ grade 欄位已經存在")
+            else:
+                logger.error(f"❌ 添加 grade 欄位失敗: {e}")
+        
+        # 檢查並添加其他可能缺少的欄位
+        try:
+            # 為現有學生設定預設值
+            Student.update(grade=None).where(Student.grade.is_null()).execute()
+            logger.info("✅ 現有學生記錄已更新預設值")
+        except Exception as e:
+            logger.error(f"❌ 更新現有記錄失敗: {e}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ 資料庫遷移失敗: {e}")
+        return False
+
 # =================== 相容性別名 ===================
 
 # 保持向後相容性
 init_database = initialize_db
+initialize_database = initialize_db
+create_tables = initialize_db
 
 # 自動初始化（僅在被導入時執行）
 if __name__ != '__main__':
     try:
         initialize_db()
+        # 執行資料庫遷移
+        migrate_database()
     except Exception as e:
         logger.error(f"自動初始化失敗: {e}")
 
@@ -541,5 +577,6 @@ if __name__ != '__main__':
 __all__ = [
     'db', 'BaseModel', 
     'Student', 'Message', 'Analysis', 'AIResponse',
-    'initialize_db', 'init_database', 'close_db'
+    'initialize_db', 'init_database', 'initialize_database', 'create_tables', 'close_db',
+    'migrate_database'
 ]
