@@ -2508,18 +2508,108 @@ def student_detail(student_id):
 
 @app.route('/student/<int:student_id>/summary')
 def student_summary(student_id):
-    """學生學習摘要頁面 - 英文版本"""
+    """學生學習摘要頁面 - 安全修復版本"""
     try:
-        from models import Student
+        from models import Student, Message
+        import datetime
         
+        # 使用修復後的 get_by_id 方法
         student = Student.get_by_id(student_id)
         if not student:
+            logger.warning(f"❌ 找不到學生 ID: {student_id}")
             return redirect('/students')
         
-        # 生成英文學習摘要
-        summary_data = generate_student_learning_summary(student_id, 'comprehensive')
+        # 🔧 安全的摘要生成，加上錯誤處理
+        try:
+            # 嘗試使用原本的摘要生成函數
+            summary_data = generate_student_learning_summary(student_id, 'comprehensive')
+            
+            # 檢查摘要是否成功生成
+            if not summary_data or summary_data.get('status') == 'error':
+                raise Exception("摘要生成失敗或返回錯誤狀態")
+                
+        except Exception as summary_error:
+            logger.error(f"⚠️ 摘要生成失敗，使用備用方案: {summary_error}")
+            
+            # 🛡️ 備用摘要生成 - 簡單但穩定
+            
+            # 取得基本資料
+            messages = list(Message.select().where(Message.student == student))
+            message_count = len(messages)
+            question_count = sum(1 for msg in messages if msg.message_type == 'question' or '?' in msg.content)
+            statement_count = message_count - question_count
+            
+            # 計算學習期間
+            if messages:
+                first_date = min(msg.timestamp for msg in messages if msg.timestamp).strftime('%Y-%m-%d')
+                last_date = max(msg.timestamp for msg in messages if msg.timestamp).strftime('%Y-%m-%d')
+                learning_period = f"{first_date} to {last_date}"
+            else:
+                learning_period = "No learning history yet"
+            
+            # 生成備用摘要
+            if message_count == 0:
+                backup_summary = f"""**Learning Profile for {student.name}**
+
+📊 **Current Status:** New Student
+🎯 **Learning Journey:** Just getting started with our AI Teaching Assistant
+📈 **Engagement Level:** Beginning orientation phase
+
+**📚 Next Steps:**
+- Encourage first interaction with the AI assistant
+- Explore different types of English learning questions
+- Begin building learning conversation history
+
+**🎯 Recommended Focus Areas:**
+- Introduction to system features
+- Basic English conversation practice
+- Setting learning goals and preferences"""
+
+            else:
+                engagement_level = "excellent" if student.participation_rate > 70 else "good" if student.participation_rate > 40 else "developing"
+                
+                backup_summary = f"""**Learning Analysis for {student.name}**
+
+📊 **Learning Overview:**
+This student has completed {message_count} learning interactions with {question_count} questions and {statement_count} statements, showing {engagement_level} engagement with the AI teaching assistant.
+
+📈 **Engagement Metrics:**
+- **Participation Rate:** {student.participation_rate:.1f}%
+- **Question Frequency:** {(question_count/max(message_count,1)*100):.1f}% of messages are questions
+- **Learning Period:** {learning_period}
+
+**🎯 Learning Characteristics:**
+{f"Shows strong curiosity with {question_count} questions asked" if question_count > 5 else "Building confidence in asking questions"}. The interaction pattern indicates {f"active self-directed learning" if student.participation_rate > 50 else "steady learning progress with guided support"}.
+
+**💡 Teaching Recommendations:**
+- {"Continue challenging with advanced topics" if student.participation_rate > 70 else "Encourage more active questioning and participation"}
+- {"Expand conversation complexity" if message_count > 15 else "Build foundation with structured learning activities"}
+- {"Consider peer learning opportunities" if student.participation_rate > 60 else "Focus on individual confidence building"}
+
+**🚀 Next Learning Steps:**
+- Continue regular interaction with AI assistant
+- Explore diverse English learning topics
+- Set specific learning objectives and goals"""
+
+            # 建立備用摘要資料
+            summary_data = {
+                'student_name': student.name,
+                'summary': backup_summary,
+                'message_count': message_count,
+                'question_count': question_count,
+                'statement_count': statement_count,
+                'participation_rate': student.participation_rate,
+                'generated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'model_used': 'backup_safe_generator',
+                'status': 'success_backup',
+                'language': 'english',
+                'learning_period': learning_period,
+                'error_handled': True,
+                'original_error': str(summary_error)
+            }
         
-        return f"""
+        # 生成 HTML 回應（無論是正常摘要還是備用摘要）
+        summary_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
@@ -2537,96 +2627,63 @@ def student_summary(student_id):
                 .meta-item {{ text-align: center; padding: 10px; background: white; border-radius: 5px; }}
                 .meta-number {{ font-size: 1.5em; font-weight: bold; color: #1976d2; }}
                 .meta-label {{ color: #666; font-size: 0.9em; }}
-                .btn {{ display: inline-block; padding: 12px 24px; margin: 5px; text-decoration: none; border-radius: 5px; font-weight: 500; }}
+                .btn {{ display: inline-block; padding: 12px 24px; margin: 5px; text-decoration: none; border-radius: 5px; font-weight: 500; text-decoration: none; }}
                 .btn-primary {{ background: #007bff; color: white; }}
                 .btn-success {{ background: #28a745; color: white; }}
                 .btn-info {{ background: #17a2b8; color: white; }}
                 .btn-warning {{ background: #ffc107; color: #212529; }}
-                .topics-list {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }}
-                .topic-tag {{ background: #007bff; color: white; padding: 5px 12px; border-radius: 15px; font-size: 0.9em; }}
-                .status-complete {{ color: #28a745; font-weight: bold; }}
-                .status-incomplete {{ color: #dc3545; font-weight: bold; }}
+                .backup-notice {{ background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 5px; margin: 20px 0; }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>📚 English Learning Summary</h1>
+                    <h1>📊 Learning Summary</h1>
                     <h2>{summary_data.get('student_name', f'Student_{student_id}')}</h2>
-                    <p>Comprehensive learning analysis based on {summary_data.get('message_count', 0)} interactions</p>
-                    <div>
-                        <a href="/student/{student_id}" class="btn btn-primary">👤 Student Details</a>
-                        <a href="/students" class="btn btn-info">👥 Student List</a>
-                        <a href="/api/export/student/{student_id}" class="btn btn-success">📥 Export Full Record</a>
-                        <a href="/admin" class="btn btn-warning">⚙️ Admin Panel</a>
-                    </div>
+                    <p>學生 ID: {student_id} | 分析時間: {summary_data.get('generated_at', 'Unknown')}</p>
                 </div>
                 
+                {'<div class="backup-notice">ℹ️ 使用備用摘要生成器確保系統穩定運作</div>' if summary_data.get('error_handled') else ''}
+                
                 <div class="summary-meta">
-                    <h3>📊 Summary Metadata</h3>
                     <div class="meta-grid">
                         <div class="meta-item">
                             <div class="meta-number">{summary_data.get('message_count', 0)}</div>
-                            <div class="meta-label">Total Messages</div>
+                            <div class="meta-label">對話次數</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-number">{summary_data.get('participation_rate', student.participation_rate):.1f}%</div>
+                            <div class="meta-label">參與度</div>
                         </div>
                         <div class="meta-item">
                             <div class="meta-number">{summary_data.get('question_count', 0)}</div>
-                            <div class="meta-label">Questions Asked</div>
+                            <div class="meta-label">提問次數</div>
                         </div>
                         <div class="meta-item">
                             <div class="meta-number">{summary_data.get('statement_count', 0)}</div>
-                            <div class="meta-label">Statements Made</div>
-                        </div>
-                        <div class="meta-item">
-                            <div class="meta-number">{summary_data.get('actual_length', 0):,}</div>
-                            <div class="meta-label">Summary Length (chars)</div>
+                            <div class="meta-label">陳述次數</div>
                         </div>
                     </div>
-                    
-                    <div style="margin-top: 15px;">
-                        <p><strong>📅 Learning Period:</strong> {summary_data.get('learning_period', 'Unknown')}</p>
-                        <p><strong>🔄 Interaction Frequency:</strong> {summary_data.get('interaction_frequency', 'Unknown')}</p>
-                        <p><strong>✅ Summary Status:</strong> 
-                           <span class="{'status-complete' if summary_data.get('complete') else 'status-incomplete'}">
-                               {'Complete (No truncation)' if summary_data.get('complete') else 'Incomplete or truncated'}
-                           </span>
-                        </p>
-                        <p><strong>🌐 Language:</strong> {summary_data.get('language', 'English').title()}</p>
-                        <p><strong>⏰ Generated:</strong> {summary_data.get('generated_at', 'Unknown')}</p>
-                    </div>"""
-        
-        # 安全地添加主題標籤
-        if summary_data.get('topics'):
-            summary_html += f"""
-                    <div style="margin-top: 15px;">
-                        <p><strong>🎯 Learning Topics Identified:</strong></p>
-                        <div class="topics-list">"""
-            for topic in summary_data.get('topics', []):
-                summary_html += f'<span class="topic-tag">{topic}</span>'
-            summary_html += """
-                        </div>
-                    </div>"""
-        
-        summary_html += f"""
                 </div>
                 
                 <div class="summary-card">
-                    <h3>📖 Comprehensive Learning Analysis</h3>
-                    <div class="summary-content">{summary_data.get('summary', 'No summary available.')}</div>
+                    <h3>📝 Learning Analysis</h3>
+                    <div class="summary-content">{summary_data.get('summary', '正在生成學習摘要...')}</div>
                 </div>
                 
                 <div style="text-align: center; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
                     <h3>📥 Export Options</h3>
                     <p>Download this complete learning summary and conversation records</p>
                     <a href="/api/export/student/{student_id}" class="btn btn-success">📋 Complete Student Record</a>
-                    <a href="/api/export/summary/{student_id}" class="btn btn-info">📊 Summary Only</a>
+                    <a href="/student/{student_id}" class="btn btn-primary">👤 Student Details</a>
+                    <a href="/students" class="btn btn-info">👥 All Students</a>
                     <a href="/teaching-insights" class="btn btn-warning">📈 Class Analytics</a>
                 </div>
                 
                 <div style="text-align: center; margin-top: 20px; color: #666;">
                     <p>✨ Generated by EMI Intelligent Teaching Assistant v2.5 | 
-                       English-Medium Instruction Support System | 
-                       Powered by Gemini AI</p>
+                       Model: {summary_data.get('model_used', 'N/A')} | 
+                       Status: {summary_data.get('status', 'Success')}</p>
                 </div>
             </div>
         </body>
@@ -2636,15 +2693,26 @@ def student_summary(student_id):
         return summary_html
         
     except Exception as e:
-        logger.error(f"❌ 學生摘要載入錯誤: {e}")
+        # 最終的錯誤處理
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"❌ 學生摘要載入全域錯誤: {e}")
+        logger.error(f"錯誤詳情: {error_details}")
+        
         return f"""
         <div style="font-family: sans-serif; text-align: center; padding: 50px;">
             <h1>❌ Summary Loading Error</h1>
             <p>Unable to load learning summary for this student.</p>
-            <p style="color: #dc3545;">Error: {str(e)}</p>
+            <div style="background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: left;">
+                <strong>Error Details:</strong><br>
+                {str(e)}<br><br>
+                <strong>Student ID:</strong> {student_id}<br>
+                <strong>Error Type:</strong> {type(e).__name__}
+            </div>
             <a href="/student/{student_id}" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">Back to Student Details</a>
+            <a href="/students" style="padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin-left: 10px;">All Students</a>
         </div>
-        """
+        """, 500
 
 # =================== 資料匯出 API 路由 ===================
 
@@ -2672,7 +2740,7 @@ def export_data(export_type, student_id=None):
             filename = f"student_{student_id}_record_{timestamp}.txt"
             
             return send_file(
-                io.BytesIO(content.encode('utf-8')),
+                BytesIO(content.encode('utf-8')),
                 mimetype='text/plain',
                 as_attachment=True,
                 download_name=filename
@@ -2712,7 +2780,7 @@ END OF SUMMARY
             filename = f"student_{student_id}_summary_{timestamp}.txt"
             
             return send_file(
-                io.BytesIO(content.encode('utf-8')),
+                BytesIO(content.encode('utf-8')),
                 mimetype='text/plain',
                 as_attachment=True,
                 download_name=filename
@@ -2744,7 +2812,7 @@ END OF SUMMARY
             filename = f"emi_complete_database_{timestamp}.txt"
             
             return send_file(
-                io.BytesIO(content.encode('utf-8')),
+                BytesIO(content.encode('utf-8')),
                 mimetype='text/plain',
                 as_attachment=True,
                 download_name=filename
@@ -2808,8 +2876,6 @@ def callback():
     
     return 'OK'
 
-# 替換 app.py 中第 4 段的 handle_message 函數
-
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     """處理文字訊息 - 修復版本"""
@@ -2827,24 +2893,26 @@ def handle_message(event):
         # 更新或創建學生記錄 - 修復版本
         from models import Student
         try:
-            # 使用 get_or_create 方法來安全地取得或創建學生
-            student, created = Student.get_or_create(
-                line_user_id=user_id,
-                defaults={
-                    'name': f'學生_{user_id[-4:]}',
-                    'created_at': datetime.datetime.now(),
-                    'last_active': datetime.datetime.now(),
-                    'is_active': True
-                }
-            )
+            # 嘗試取得現有學生
+            student = Student.get_by_line_id(user_id)
+            # 更新最後活動時間
+            student.last_active = datetime.datetime.now()
+            student.save()
+            logger.info(f"📝 更新學生活動: {student.name}")
+                
+        except Student.DoesNotExist:
+            # 創建新學生
+            try:
+                # 嘗試取得 LINE 使用者資料
+                profile = line_bot_api.get_profile(user_id)
+                display_name = profile.display_name
+                logger.info(f"📱 取得 LINE 暱稱: {display_name}")
+            except Exception as profile_error:
+                logger.warning(f"⚠️ 無法取得 LINE 暱稱: {profile_error}")
+                display_name = f"User_{user_id[-6:]}"
             
-            if created:
-                logger.info(f"🆕 創建新學生記錄: {student.name}")
-            else:
-                # 更新現有學生的最後活動時間
-                student.last_active = datetime.datetime.now()
-                student.save()
-                logger.info(f"📝 更新學生活動: {student.name}")
+            student, _ = Student.get_or_create_from_line_id(user_id, display_name)
+            logger.info(f"🆕 創建新學生記錄: {student.name}")
                 
         except Exception as student_error:
             logger.error(f"❌ 學生記錄處理錯誤: {student_error}")
@@ -2972,4 +3040,4 @@ if __name__ == '__main__':
     finally:
         logger.info("👋 EMI智能教學助理已關閉")
 
-# =================== app.py 完整版 - 第 4 段修復版結束（全檔案完成） ===================
+# =================== app.py 完整版結束 ===================
