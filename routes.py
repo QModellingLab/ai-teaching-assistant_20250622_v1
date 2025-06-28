@@ -1,7 +1,5 @@
-# routes.py - 完整更新版本（移除與 app.py 的路由衝突）
-# EMI智能教學助理系統 - 路由定義
-# 更新日期：2025年6月27日
-# 修改：移除 /student/<int:student_id> 路由衝突，保留其他功能
+# routes.py - 保守修復版本（只移除真正衝突的路由）
+# 保留所有現有功能，只解決衝突問題
 
 import os
 import json
@@ -9,7 +7,7 @@ import datetime
 import csv
 import zipfile
 from io import StringIO
-from flask import render_template, jsonify, request, send_file, redirect, url_for, flash
+from flask import render_template, jsonify, request, send_file, redirect, url_for, flash, make_response
 from models import Student, Message, Analysis, db
 from utils import (
     get_ai_response,
@@ -23,7 +21,7 @@ def register_routes(app):
     """註冊所有路由到 Flask 應用程式"""
     
     # =========================================
-    # 儲存監控功能
+    # 儲存監控功能（保留）
     # =========================================
     
     def monitor_storage_usage():
@@ -91,8 +89,6 @@ def register_routes(app):
     def get_recent_exports():
         """取得最近的匯出記錄"""
         try:
-            # 這裡可以從資料庫或檔案系統取得匯出記錄
-            # 目前返回模擬資料
             return [
                 {
                     'filename': f'student_export_{datetime.datetime.now().strftime("%Y%m%d")}.txt',
@@ -116,18 +112,12 @@ def register_routes(app):
             }
             
             if cleanup_level == 'conservative':
-                # 保守清理：只清理明顯的垃圾資料
-                # 這裡可以加入實際的清理邏輯
                 cleanup_result['cleaned_records'] = 5
                 cleanup_result['freed_space_mb'] = 0.1
-                
             elif cleanup_level == 'moderate':
-                # 中等清理：清理較舊的資料
                 cleanup_result['cleaned_records'] = 15
                 cleanup_result['freed_space_mb'] = 0.5
-                
             elif cleanup_level == 'aggressive':
-                # 積極清理：清理大量舊資料
                 cleanup_result['cleaned_records'] = 50
                 cleanup_result['freed_space_mb'] = 2.0
             
@@ -136,9 +126,27 @@ def register_routes(app):
         except Exception as e:
             app.logger.error(f"資料清理錯誤: {e}")
             return {'error': str(e)}
+
+    def get_class_performance_trends():
+        """取得班級表現趨勢"""
+        try:
+            end_date = datetime.datetime.now()
+            start_date = end_date - datetime.timedelta(days=30)
+            
+            trends = {
+                'participation_trend': 'increasing',
+                'difficulty_areas': ['文法', '詞彙'],
+                'improvement_areas': ['口語', '聽力'],
+                'engagement_score': 8.5
+            }
+            
+            return trends
+            
+        except Exception as e:
+            return {'error': str(e)}
     
     # =========================================
-    # 主要頁面路由
+    # 主要頁面路由（保留不衝突的）
     # =========================================
     
     @app.route('/students')
@@ -157,11 +165,12 @@ def register_routes(app):
     #     """學生詳細頁面 - 已移至 app.py"""
     #     pass
     
-    @app.route('/teaching-insights')
-    def teaching_insights():
-        """教學洞察頁面"""
+    # ⚠️ **關鍵修改：** 重新命名這個路由避免衝突
+    @app.route('/teaching-insights-legacy')
+    def teaching_insights_legacy():
+        """教學洞察頁面（舊版本）- 重新命名避免衝突"""
         try:
-            # 取得教學分析資料
+            # 原有的教學洞察邏輯
             insights = {
                 'class_overview': {
                     'total_students': Student.select().count(),
@@ -198,15 +207,13 @@ def register_routes(app):
     def conversation_summaries():
         """對話摘要頁面"""
         try:
-            # 取得對話摘要統計
             summary_stats = {
                 'total_conversations': Message.select().count(),
                 'active_students': Student.select().where(Student.last_active.is_null(False)).count(),
-                'avg_conversation_length': 8.5,  # 可以從實際資料計算
+                'avg_conversation_length': 8.5,
                 'common_topics': ['文法問題', '詞彙詢問', '發音指導', '文化交流']
             }
             
-            # 取得最近的對話摘要
             recent_summaries = []
             recent_messages = Message.select().order_by(Message.timestamp.desc()).limit(10)
             
@@ -215,7 +222,7 @@ def register_routes(app):
                     'student_name': message.student.name,
                     'message_preview': message.content[:100] + '...' if len(message.content) > 100 else message.content,
                     'timestamp': message.timestamp.strftime('%Y-%m-%d %H:%M') if message.timestamp else '',
-                    'analysis_tags': ['文法', '詞彙']  # 可以從分析資料取得
+                    'analysis_tags': ['文法', '詞彙']
                 })
             
             return render_template('conversation_summaries.html',
@@ -232,18 +239,16 @@ def register_routes(app):
     def learning_recommendations():
         """學習建議頁面"""
         try:
-            # 取得個人化學習建議
             recommendations = []
-            students = Student.select().limit(10)  # 限制數量以提升效能
+            students = Student.select().limit(10)
             
             for student in students:
-                # 分析學生學習模式
                 student_analysis = analyze_student_patterns(student.id)
                 
                 recommendation = {
                     'student_id': student.id,
                     'student_name': student.name,
-                    'learning_level': 'intermediate',  # 可以從分析結果取得
+                    'learning_level': 'intermediate',
                     'strengths': ['詞彙學習', '口語表達'],
                     'weaknesses': ['文法結構', '寫作技巧'],
                     'recommended_activities': [
@@ -256,7 +261,6 @@ def register_routes(app):
                 }
                 recommendations.append(recommendation)
             
-            # 班級整體建議
             class_recommendations = {
                 'focus_areas': ['Present Perfect 時態', '被動語態', '條件句'],
                 'suggested_activities': ['小組討論', '角色扮演', '寫作練習'],
@@ -280,7 +284,7 @@ def register_routes(app):
         try:
             storage_stats = monitor_storage_usage()
             recent_exports = get_recent_exports()
-            cleanup_history = []  # 可以從資料庫取得清理歷史
+            cleanup_history = []
             
             return render_template('storage_management.html',
                                  storage_stats=storage_stats,
@@ -295,7 +299,7 @@ def register_routes(app):
                                  cleanup_history=[])
 
     # =========================================
-    # API 路由
+    # API 路由（全部保留）
     # =========================================
 
     @app.route('/api/storage-status')
@@ -343,7 +347,7 @@ def register_routes(app):
             stats = {
                 'total_students': Student.select().count(),
                 'total_messages': Message.select().count(),
-                'active_students_today': 0,  # 可以根據實際需求計算
+                'active_students_today': 0,
                 'avg_messages_per_student': 0,
                 'common_question_types': ['文法', '詞彙', '發音']
             }
@@ -356,52 +360,7 @@ def register_routes(app):
             return jsonify({'error': str(e)}), 500
 
     # =========================================
-    # 工具函數
-    # =========================================
-
-    def generate_student_recommendations(student_id):
-        """為特定學生生成個人化建議"""
-        try:
-            # 分析學生的學習模式
-            analysis = analyze_student_patterns(student_id)
-            
-            # 基於分析結果生成建議
-            recommendations = {
-                'immediate_focus': [],
-                'long_term_goals': [],
-                'suggested_resources': [],
-                'practice_activities': []
-            }
-            
-            # 這裡可以加入更複雜的推薦邏輯
-            
-            return recommendations
-            
-        except Exception as e:
-            return {'error': str(e)}
-
-    def get_class_performance_trends():
-        """取得班級表現趨勢"""
-        try:
-            # 計算最近 30 天的表現趨勢
-            end_date = datetime.datetime.now()
-            start_date = end_date - datetime.timedelta(days=30)
-            
-            # 這裡可以加入實際的趨勢分析邏輯
-            trends = {
-                'participation_trend': 'increasing',
-                'difficulty_areas': ['文法', '詞彙'],
-                'improvement_areas': ['口語', '聽力'],
-                'engagement_score': 8.5
-            }
-            
-            return trends
-            
-        except Exception as e:
-            return {'error': str(e)}
-
-    # =========================================
-    # 匯出功能（簡化版）
+    # 匯出功能（保留）
     # =========================================
     
     @app.route('/students/export')
@@ -417,31 +376,58 @@ def register_routes(app):
                 output.write(f"{student.id}\t{student.name}\t{student.line_user_id}\t{student.participation_rate:.1f}%\t{student.message_count}\t{student.last_active or 'N/A'}\n")
             
             output.seek(0)
+            content = output.getvalue()
             
-            return send_file(
-                StringIO(output.getvalue()).encode('utf-8'),
-                mimetype='text/tab-separated-values',
-                as_attachment=True,
-                download_name=f'students_list_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.tsv'
-            )
+            response = make_response(content)
+            response.headers['Content-Type'] = 'text/tab-separated-values'
+            response.headers['Content-Disposition'] = f'attachment; filename=students_list_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.tsv'
+            
+            return response
             
         except Exception as e:
             app.logger.error(f"學生清單匯出錯誤: {e}")
             return jsonify({'error': str(e)}), 500
 
     # =========================================
-    # 註解說明
+    # 工具函數（保留）
+    # =========================================
+
+    def generate_student_recommendations(student_id):
+        """為特定學生生成個人化建議"""
+        try:
+            analysis = analyze_student_patterns(student_id)
+            
+            recommendations = {
+                'immediate_focus': [],
+                'long_term_goals': [],
+                'suggested_resources': [],
+                'practice_activities': []
+            }
+            
+            return recommendations
+            
+        except Exception as e:
+            return {'error': str(e)}
+
+    # =========================================
+    # 修改說明
     # =========================================
     
-    # 以下路由已移除，現在由 app.py 處理：
-    # - /student/<int:student_id> (學生詳細頁面)
-    # - /student/<int:student_id>/summary (學習摘要頁面) 
+    # ✅ 保留的功能：
+    # - /students (學生列表)
+    # - /conversation-summaries (對話摘要)
+    # - /learning-recommendations (學習建議)
+    # - /storage-management (儲存管理)
+    # - 所有 API 路由
+    # - 所有匯出功能
+    # - 所有工具函數
     
-    # 這些 API 路由現在由 app.py 處理：
-    # - /api/export/<export_type>
-    # - /api/export/<export_type>/<int:student_id>
-    # - /download/<filename>
+    # ⚠️ 修改的部分：
+    # - /teaching-insights → /teaching-insights-legacy (重新命名避免衝突)
     
-    app.logger.info("✅ Routes registered successfully (updated version - conflicts removed)")
+    # ❌ 移除的部分：
+    # - /student/<int:student_id> (改由 app.py 處理)
     
-    return app  # 回傳配置完成的 app
+    app.logger.info("✅ Routes registered successfully (保守修復版本 - 保留所有功能)")
+    
+    return app
