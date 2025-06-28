@@ -1,0 +1,508 @@
+<!-- teaching_insights.html - 教學洞察頁面（更新版）-->
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title or '教學洞察' }} | EMI教學助理</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+            backdrop-filter: blur(10px);
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 1.5rem;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+            transition: transform 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #3498db;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 1rem;
+        }
+        
+        .insights-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .insight-card {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        
+        .insight-card h2 {
+            color: #2c3e50;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .summary-content {
+            white-space: pre-wrap;
+            line-height: 1.8;
+            font-size: 1.05rem;
+            color: #2c3e50;
+        }
+        
+        .keywords-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        
+        .keyword-tag {
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin-left: 1rem;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-fallback {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .alert {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .action-section {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 1.5rem;
+        }
+        
+        .btn {
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .system-status {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #7f8c8d;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        
+        @media (max-width: 1024px) {
+            .insights-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .header {
+                padding: 1.5rem;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+            }
+            
+            .insight-card {
+                padding: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 標題和統計區域 -->
+        <div class="header">
+            <h1>
+                📈 教學洞察儀表板
+                {% if system_status.ai_service.status == 'available' %}
+                    <span class="status-indicator status-success">✅ AI運作中</span>
+                {% else %}
+                    <span class="status-indicator status-error">⚠️ AI離線</span>
+                {% endif %}
+            </h1>
+            
+            <!-- 班級統計 -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.total_students }}</div>
+                    <div class="stat-label">總學生數</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.active_students }}</div>
+                    <div class="stat-label">活躍學生</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {{ stats.participation_rate }}%;"></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.total_messages }}</div>
+                    <div class="stat-label">總互動次數</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.total_questions }}</div>
+                    <div class="stat-label">總提問數</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {{ stats.question_rate }}%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 洞察分析區域 -->
+        <div class="insights-grid">
+            <!-- 班級摘要 -->
+            <div class="insight-card">
+                <h2>
+                    🏫 班級學習摘要
+                    {% if class_summary.status == 'success' %}
+                        <span class="status-indicator status-success">✅ AI分析</span>
+                    {% elif class_summary.status == 'fallback' %}
+                        <span class="status-indicator status-fallback">📊 統計資料</span>
+                    {% else %}
+                        <span class="status-indicator status-error">⚠️ 載入失敗</span>
+                    {% endif %}
+                </h2>
+                
+                {% if class_summary.status == 'error' %}
+                    <div class="alert alert-warning">
+                        ⚠️ {{ class_summary.message or '無法載入班級摘要' }}
+                    </div>
+                {% endif %}
+                
+                {% if class_summary.status == 'fallback' %}
+                    <div class="alert alert-info">
+                        📊 目前顯示基於統計資料的摘要。AI詳細分析暫時無法使用。
+                    </div>
+                {% endif %}
+                
+                <div class="summary-content">{{ class_summary.summary or '暫無摘要資料' }}</div>
+            </div>
+            
+            <!-- 學習關鍵詞 -->
+            <div class="insight-card">
+                <h2>
+                    🔍 學習關鍵詞
+                    {% if learning_keywords.status == 'success' %}
+                        <span class="status-indicator status-success">✅ AI分析</span>
+                    {% elif learning_keywords.status == 'fallback' %}
+                        <span class="status-indicator status-fallback">📊 統計資料</span>
+                    {% else %}
+                        <span class="status-indicator status-error">⚠️ 載入失敗</span>
+                    {% endif %}
+                </h2>
+                
+                {% if learning_keywords.status == 'error' %}
+                    <div class="alert alert-warning">
+                        ⚠️ 無法載入關鍵詞分析
+                    </div>
+                {% endif %}
+                
+                <div class="keywords-list">
+                    {% for keyword in learning_keywords.keywords or [] %}
+                        <span class="keyword-tag">{{ keyword }}</span>
+                    {% endfor %}
+                </div>
+                
+                {% if learning_keywords.status == 'fallback' %}
+                    <p style="margin-top: 1rem; color: #6c757d; font-size: 0.9rem;">
+                        💡 基於詞頻分析生成的關鍵詞
+                    </p>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- 操作和匯出區域 -->
+        <div class="action-section">
+            <h2 style="color: #2c3e50; margin-bottom: 1rem;">📊 資料匯出與管理</h2>
+            <p style="color: #7f8c8d; margin-bottom: 1.5rem;">
+                匯出班級學習資料進行進一步分析，或檢查系統狀態確保服務正常運作。
+            </p>
+            
+            <div class="action-buttons">
+                <a href="{{ url_for('download_all_questions') }}" class="btn btn-primary">
+                    📄 匯出全班提問
+                </a>
+                
+                <a href="{{ url_for('download_class_analytics') }}" class="btn btn-success">
+                    📊 匯出班級分析
+                </a>
+                
+                <a href="{{ url_for('api_system_health') }}" class="btn btn-info" target="_blank">
+                    🏥 系統健康檢查
+                </a>
+                
+                <a href="{{ url_for('api_performance_benchmark') }}" class="btn btn-secondary" target="_blank">
+                    ⏱️ 效能測試
+                </a>
+                
+                <button onclick="refreshInsights()" class="btn btn-primary" id="refreshBtn">
+                    🔄 重新整理分析
+                </button>
+            </div>
+            
+            <!-- 系統狀態資訊 -->
+            <div class="system-status">
+                <strong>系統狀態：</strong>
+                {% if system_status %}
+                    AI服務: {{ system_status.ai_service.status | title }} | 
+                    資料庫: {{ system_status.database.status | title }} | 
+                    系統負載: {{ system_status.system_load | title }} |
+                    快取項目: {{ system_status.cache.active_items or 0 }} 個
+                {% else %}
+                    正在檢查...
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 重新整理洞察
+        function refreshInsights() {
+            const btn = document.getElementById('refreshBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width: 20px; height: 20px; margin: 0 5px 0 0;"></div>重新分析中...';
+            
+            // 添加查詢參數來刷新快取
+            const url = new URL(window.location);
+            url.searchParams.set('refresh', Date.now());
+            window.location = url.toString();
+        }
+        
+        // 自動檢查API狀態
+        async function checkSystemHealth() {
+            try {
+                const response = await fetch('/api/system-status');
+                const status = await response.json();
+                
+                if (status.ai_service.status !== 'available') {
+                    console.warn('⚠️ AI服務不可用');
+                    
+                    // 顯示警告提示
+                    if (!document.querySelector('.ai-warning')) {
+                        const warning = document.createElement('div');
+                        warning.className = 'alert alert-warning ai-warning';
+                        warning.innerHTML = '⚠️ AI服務暫時不可用，分析結果可能受限。';
+                        document.querySelector('.header').appendChild(warning);
+                    }
+                }
+            } catch (error) {
+                console.error('系統狀態檢查失敗:', error);
+            }
+        }
+        
+        // 頁面載入時檢查系統狀態
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSystemHealth();
+            
+            // 每5分鐘檢查一次
+            setInterval(checkSystemHealth, 300000);
+        });
+        
+        // 進度條動畫
+        document.addEventListener('DOMContentLoaded', function() {
+            const progressBars = document.querySelectorAll('.progress-fill');
+            progressBars.forEach(bar => {
+                const width = bar.style.width;
+                bar.style.width = '0%';
+                setTimeout(() => {
+                    bar.style.width = width;
+                }, 500);
+            });
+        });
+        
+        // 顯示載入提示
+        if ({{ 'true' if class_summary.status == 'error' or learning_keywords.status == 'error' else 'false' }}) {
+            setTimeout(() => {
+                if (confirm('部分分析載入失敗，是否要重新嘗試？')) {
+                    refreshInsights();
+                }
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
