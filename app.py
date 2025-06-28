@@ -6,13 +6,27 @@ import json
 import logging
 import datetime
 from flask import Flask, request, abort, jsonify, render_template_string
+from flask import make_response, flash, redirect, url_for
+from datetime import timedelta
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError, LineBotApiError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import google.generativeai as genai
 from urllib.parse import quote
 import re
-
+from teaching_analytics import (
+    generate_individual_summary,
+    generate_class_summary,
+    extract_learning_keywords,
+    export_student_questions_tsv,
+    export_all_questions_tsv,
+    export_student_analytics_tsv,
+    export_class_analytics_tsv,
+    get_system_status,
+    perform_system_health_check,
+    get_analytics_statistics,
+    benchmark_performance
+)
 # =================== 日誌配置 ===================
 
 # 設定日誌格式
@@ -556,6 +570,151 @@ def handle_message(event):
 
 # =================== app.py 修復版 - 第4段開始 ===================
 # 學生管理路由
+@app.route('/students/<int:student_id>/summary')
+def student_summary(student_id):
+    """個人學習摘要頁面"""
+    try:
+        logger.info(f"📊 載入學生 {student_id} 的學習摘要...")
+        
+        # 檢查學生是否存在
+        student = Student.get_or_none(Student.id == student_id)
+        if not student:
+            flash('找不到指定學生', 'error')
+            return redirect(url_for('students'))
+        
+        # 獲取AI摘要（使用快取和錯誤處理）
+        summary_data = generate_individual_summary(student_id)
+        
+        # 獲取基本統計資料
+        messages = list(Message.select().where(Message.student_id == student_id))
+        questions = [m for m in messages if '?' in m.content or '？' in m.content]
+        
+        # 準備模板資料
+        context = {
+            'student': student,
+            'summary_data': summary_data,
+            'stats': {
+                'total_messages': len(messages),
+                'question_count': len(questions),
+                'latest_activity': messages[-1].timestamp if messages else None,
+                'learning_days': (datetime.datetime.now() - student.created_at).days if student.created_at else 0
+            }
+        }
+        
+        return render_template('student_summary.html', **context)
+    
+    except Exception as e:
+        logger.error(f"❌ 學生摘要頁面錯誤: {e}")
+        flash('載入摘要時發生錯誤', 'error')
+        return redirect(url_for('students'))
+
+@app.route('/students/<int:student_id>/download-questions')
+def download_student_questions(student_id):
+    """下載個別學生提問記錄"""
+    try:
+        logger.info(f"📄 下載學生 {student_id} 的提問記錄...")
+        
+        # 生成TSV資料
+        tsv_data = export_student_questions_tsv(student_id)
+        
+        if tsv_data.get('status') == 'error':
+            return jsonify({'error': tsv_data.get('error', '下載失敗')}), 400
+        
+        if tsv_data.get('status') == 'no_data':
+            return jsonify({'error': '該學生沒有提問記錄'}), 404
+        
+        # 建立回應
+        response = make_response(tsv_data['content'])
+        response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
+        response.headers['Content-Disposition'] = f'attachment; filename="{tsv_data["filename"]}"'
+        
+        logger.info(f"✅ 成功下載 {tsv_data['question_count']} 個提問記錄")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ 下載學生提問錯誤: {e}")
+        return jsonify({'error': '下載失敗，請稍後再試'}), 500
+
+@app.route('/students/<int:student_id>/download-analytics')
+def download_student_analytics(student_id):
+    """下載個別學生完整分析資料"""
+    try:
+        logger.info(f"📊 下載學生 {student_id} 的完整分析資料...")
+        
+        # 生成TSV資料
+        tsv_data = export_student_analytics_tsv(student_id)
+        
+        if tsv_data.get('status') == 'error':
+            return jsonify({'error': tsv_data.get('error', '下載失敗')}), 400
+        
+        if tsv_data.get('status') == 'no_data':
+            return jsonify({'error': '該學生沒有訊息記錄'}), 404
+        
+        # 建立回應
+        response = make_response(tsv_data['content'])
+        response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
+        response.headers['Content-Disposition'] = f'attachment; filename="{tsv_data["filename"]}"'
+        
+        logger.info(f"✅ 成功下載 {tsv_data['total_messages']} 則訊息的分析資料")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ 下載學生分析錯誤: {e}")
+        return jsonify({'error': '下載失敗，請稍後再試'}), 500
+
+@app.route('/download-all-questions')
+def download_all_questions():
+    """下載所有學生提問記錄"""
+    try:
+        logger.info("📄 下載所有學生的提問記錄...")
+        
+        # 生成TSV資料
+        tsv_data = export_all_questions_tsv()
+        
+        if tsv_data.get('status') == 'error':
+            return jsonify({'error': tsv_data.get('error', '下載失敗')}), 400
+        
+        if tsv_data.get('status') == 'no_data':
+            return jsonify({'error': '沒有找到任何提問記錄'}), 404
+        
+        # 建立回應
+        response = make_response(tsv_data['content'])
+        response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
+        response.headers['Content-Disposition'] = f'attachment; filename="{tsv_data["filename"]}"'
+        
+        logger.info(f"✅ 成功下載 {tsv_data['total_questions']} 個提問記錄")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ 下載所有提問錯誤: {e}")
+        return jsonify({'error': '下載失敗，請稍後再試'}), 500
+
+@app.route('/download-class-analytics')
+def download_class_analytics():
+    """下載全班分析資料"""
+    try:
+        logger.info("📊 下載全班分析資料...")
+        
+        # 生成TSV資料
+        tsv_data = export_class_analytics_tsv()
+        
+        if tsv_data.get('status') == 'error':
+            return jsonify({'error': tsv_data.get('error', '下載失敗')}), 400
+        
+        if tsv_data.get('status') == 'no_data':
+            return jsonify({'error': '沒有找到學生資料'}), 404
+        
+        # 建立回應
+        response = make_response(tsv_data['content'])
+        response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
+        response.headers['Content-Disposition'] = f'attachment; filename="{tsv_data["filename"]}"'
+        
+        logger.info(f"✅ 成功下載 {tsv_data['total_students']} 位學生的分析資料")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ 下載全班分析錯誤: {e}")
+        return jsonify({'error': '下載失敗，請稍後再試'}), 500
 
 @app.route('/students')
 def students_list():
@@ -914,125 +1073,145 @@ def student_detail(student_id):
 
 @app.route('/teaching-insights')
 def teaching_insights():
-    """教學洞察分析頁面"""
+    """教學洞察頁面 - 完全重寫使用新的分析系統"""
     try:
-        from models import Student, Message
+        logger.info("📊 載入教學洞察頁面...")
         
-        # 統計資料分析
+        # 獲取基本統計資料
         total_students = Student.select().count()
         total_messages = Message.select().count()
-        active_students = Student.select().where(
-            (Student.last_active.is_null(False)) & 
-            (Student.last_active >= datetime.datetime.now() - datetime.timedelta(days=7))
+        total_questions = Message.select().where(
+            (Message.content.contains('?')) | (Message.content.contains('？'))
         ).count()
         
-        # 訊息類型分析
-        questions_count = Message.select().where(Message.message_type == 'question').count()
-        responses_count = Message.select().where(Message.message_type == 'response').count()
+        # 計算活躍學生數（7天內有活動）
+        week_ago = datetime.datetime.now() - timedelta(days=7)
+        active_students = Student.select().where(
+            Student.last_active >= week_ago
+        ).count()
         
-        insights_html = f"""
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>教學洞察分析 - EMI 智能教學助理</title>
-    <style>
-        body {{ font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #f8f9fa; }}
-        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 0; }}
-        .container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
-        .page-title {{ text-align: center; font-size: 2.5em; margin-bottom: 10px; }}
-        .page-subtitle {{ text-align: center; opacity: 0.9; }}
-        .insights-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 30px; }}
-        .insight-card {{ background: white; border-radius: 15px; padding: 25px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }}
-        .card-title {{ font-size: 1.3em; font-weight: bold; margin-bottom: 15px; color: #333; }}
-        .card-content {{ line-height: 1.6; }}
-        .stat-highlight {{ background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 15px 0; }}
-        .back-button {{ display: inline-block; padding: 10px 20px; background: rgba(255,255,255,0.2); color: white; text-decoration: none; border-radius: 5px; margin-bottom: 20px; }}
-        .back-button:hover {{ background: rgba(255,255,255,0.3); }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="container">
-            <a href="/" class="back-button">← 返回首頁</a>
-            <h1 class="page-title">📈 教學洞察分析</h1>
-            <p class="page-subtitle">基於真實使用數據的教學分析報告</p>
-        </div>
-    </div>
-    
-    <div class="container">
-        <div class="insights-grid">
-            <div class="insight-card">
-                <div class="card-title">👥 學生參與度</div>
-                <div class="card-content">
-                    <div class="stat-highlight">
-                        <strong>總註冊學生：</strong>{total_students} 人<br>
-                        <strong>活躍學生：</strong>{active_students} 人<br>
-                        <strong>參與率：</strong>{round((active_students/total_students*100) if total_students > 0 else 0, 1)}%
-                    </div>
-                    <p>本週有 {active_students} 位學生與AI助理互動，顯示系統使用率良好。建議持續優化用戶體驗以提升參與度。</p>
-                </div>
-            </div>
-            
-            <div class="insight-card">
-                <div class="card-title">💬 對話品質</div>
-                <div class="card-content">
-                    <div class="stat-highlight">
-                        <strong>總對話數：</strong>{total_messages} 條<br>
-                        <strong>學生提問：</strong>{questions_count} 條<br>
-                        <strong>AI回應：</strong>{responses_count} 條
-                    </div>
-                    <p>平均每位學生產生 {round(total_messages/total_students, 1) if total_students > 0 else 0} 條對話記錄，顯示學生與系統互動良好。</p>
-                </div>
-            </div>
-            
-            <div class="insight-card">
-                <div class="card-title">🎯 系統效能</div>
-                <div class="card-content">
-                    <div class="stat-highlight">
-                        <strong>問題解決率：</strong>95%<br>
-                        <strong>滿意度指標：</strong>良好
-                    </div>
-                    <p>AI助理能有效解答大部分學生問題，持續優化回應質量將進一步提升學習體驗。</p>
-                </div>
-            </div>
-            
-            <div class="insight-card">
-                <div class="card-title">💡 改進建議</div>
-                <div class="card-content">
-                    <ul>
-                        <li>🔸 增加互動式練習功能</li>
-                        <li>🔸 提供個人化學習路徑</li>
-                        <li>🔸 建立學習進度追蹤機制</li>
-                        <li>🔸 優化夜間回應速度</li>
-                        <li>🔸 擴充多媒體教學資源</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
+        # 獲取AI分析結果（使用快取系統）
+        class_summary = generate_class_summary()
+        learning_keywords = extract_learning_keywords()
         
-        <div style="text-align: center; margin-top: 40px; padding: 20px; background: white; border-radius: 15px;">
-            <h3>📊 系統表現摘要</h3>
-            <p>基於真實使用數據的教學洞察分析，幫助優化教學策略和系統功能。</p>
-            <p style="font-size: 0.9em; color: #6c757d;">數據更新時間：{datetime.datetime.now().strftime('%Y年%m月%d日 %H:%M')}</p>
-        </div>
-    </div>
-</body>
-</html>
-        """
+        # 獲取系統狀態
+        system_status = get_system_status()
         
-        return insights_html
+        # 準備模板資料
+        context = {
+            'stats': {
+                'total_students': total_students,
+                'total_questions': total_questions,
+                'active_students': active_students,
+                'total_messages': total_messages,
+                'participation_rate': round((active_students / max(total_students, 1)) * 100, 1),
+                'question_rate': round((total_questions / max(total_messages, 1)) * 100, 1)
+            },
+            'class_summary': class_summary,
+            'learning_keywords': learning_keywords,
+            'system_status': system_status,
+            'page_title': '📈 教學洞察'
+        }
+        
+        return render_template('teaching_insights.html', **context)
         
     except Exception as e:
-        logger.error(f"❌ 教學洞察載入錯誤: {e}")
-        return f"""
-        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-            <h1>📈 教學洞察分析</h1>
-            <p style="color: #dc3545;">載入錯誤：{str(e)}</p>
-            <a href="/" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回首頁</a>
-        </div>
-        """
+        logger.error(f"❌ 教學洞察頁面錯誤: {e}")
+        flash('載入教學洞察時發生錯誤', 'error')
+        
+        # 提供基本的錯誤頁面資料
+        fallback_context = {
+            'stats': {
+                'total_students': 0, 'total_questions': 0, 
+                'active_students': 0, 'total_messages': 0,
+                'participation_rate': 0, 'question_rate': 0
+            },
+            'class_summary': {
+                'status': 'error', 
+                'summary': '⚠️ 無法載入班級摘要，請稍後再試。'
+            },
+            'learning_keywords': {
+                'status': 'error', 
+                'keywords': ['系統維護中']
+            },
+            'system_status': {
+                'status': 'error'
+            },
+            'page_title': '📈 教學洞察'
+        }
+        
+        return render_template('teaching_insights.html', **fallback_context)
+
+@app.route('/api/system-status')
+def api_system_status():
+    """系統狀態 API"""
+    try:
+        status = get_system_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"❌ 系統狀態API錯誤: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system-health')
+def api_system_health():
+    """系統健康檢查 API"""
+    try:
+        health = perform_system_health_check()
+        return jsonify(health)
+    except Exception as e:
+        logger.error(f"❌ 系統健康檢查API錯誤: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/analytics-stats')
+def api_analytics_stats():
+    """分析統計 API"""
+    try:
+        stats = get_analytics_statistics()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"❌ 分析統計API錯誤: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/performance-benchmark')
+def api_performance_benchmark():
+    """效能基準測試 API"""
+    try:
+        benchmark = benchmark_performance()
+        return jsonify(benchmark)
+    except Exception as e:
+        logger.error(f"❌ 效能測試API錯誤: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/student/<int:student_id>/summary')
+def api_student_summary(student_id):
+    """學生摘要 API"""
+    try:
+        summary = generate_individual_summary(student_id)
+        return jsonify(summary)
+    except Exception as e:
+        logger.error(f"❌ 學生摘要API錯誤: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/class-summary')
+def api_class_summary():
+    """全班摘要 API"""
+    try:
+        summary = generate_class_summary()
+        return jsonify(summary)
+    except Exception as e:
+        logger.error(f"❌ 全班摘要API錯誤: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/learning-keywords')
+def api_learning_keywords():
+    """學習關鍵詞 API"""
+    try:
+        keywords = extract_learning_keywords()
+        return jsonify(keywords)
+    except Exception as e:
+        logger.error(f"❌ 關鍵詞API錯誤: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 # =================== app.py 修復版 - 第5段結束 ===================
 
