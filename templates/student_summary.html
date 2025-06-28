@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 {{ student.name }} - 個人學習摘要</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <nav class="mobile-nav">
+        <div class="nav-header">
+            <h1>📊 學習摘要</h1>
+            <button class="nav-toggle" onclick="toggleMobileNav()">☰</button>
+        </div>
+        <div class="nav-menu" id="mobile-menu">
+            <a href="/students">👥 學生列表</a>
+            <a href="/teaching-insights">📈 教學洞察</a>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="student-header">
+            <div class="student-avatar-large">
+                <span class="avatar-text">{{ student.name[0] }}</span>
+            </div>
+            <div class="student-header-info">
+                <h1 class="student-name">👤 {{ student.name }}</h1>
+                <p class="student-subtitle">📊 個人學習摘要分析</p>
+            </div>
+        </div>
+        
+        <div id="loading-container" class="loading-container text-center" style="display: none;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">🤖 AI正在分析學習記錄...</div>
+        </div>
+        
+        <div id="summary-container" class="summary-container">
+            {% if summary_data.status == 'success' %}
+                <div class="card mb-6">
+                    <div class="card-header">
+                        <h2>🤖 AI學習分析報告</h2>
+                        <span class="analysis-badge success">分析完成</span>
+                    </div>
+                    <div class="summary-content">
+                        {{ summary_data.summary | safe }}
+                    </div>
+                    
+                    <div class="summary-meta">
+                        📅 分析時間：{{ summary_data.generated_at }}
+                        {% if summary_data.message_count %}
+                        | 📊 分析訊息數：{{ summary_data.message_count }}
+                        {% endif %}
+                    </div>
+                </div>
+                
+            {% elif summary_data.status == 'fallback' %}
+                <div class="card mb-6">
+                    <div class="card-header">
+                        <h2>📊 基本學習統計</h2>
+                        <span class="analysis-badge warning">備用模式</span>
+                    </div>
+                    <div class="summary-content">
+                        {{ summary_data.summary | safe }}
+                    </div>
+                    
+                    <div class="alert alert-warning">
+                        ℹ️ {{ summary_data.message }}
+                        <button onclick="retryAnalysis()" class="btn btn-sm btn-primary ml-2">
+                            🔄 重新嘗試AI分析
+                        </button>
+                    </div>
+                </div>
+                
+            {% else %}
+                <div class="card mb-6">
+                    <div class="error-container text-center">
+                        <div class="error-icon">⚠️</div>
+                        <h3>分析失敗</h3>
+                        <div class="error-message">
+                            {{ summary_data.message or '無法生成學習摘要，請稍後再試。' }}
+                        </div>
+                        <button onclick="retryAnalysis()" class="btn btn-primary mt-4">
+                            🔄 重新分析
+                        </button>
+                    </div>
+                </div>
+            {% endif %}
+            
+            <div class="quick-stats grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div class="stat-card-small">
+                    <div class="stat-icon">💬</div>
+                    <div class="stat-number">{{ summary_data.data.total_messages or 0 }}</div>
+                    <div class="stat-label">總訊息數</div>
+                </div>
+                <div class="stat-card-small">
+                    <div class="stat-icon">❓</div>
+                    <div class="stat-number">{{ summary_data.data.question_count or 0 }}</div>
+                    <div class="stat-label">提問數量</div>
+                </div>
+                <div class="stat-card-small">
+                    <div class="stat-icon">📅</div>
+                    <div class="stat-number">
+                        {% if summary_data.data.last_active %}
+                            {{ (now() - summary_data.data.last_active).days }}
+                        {% else %}
+                            --
+                        {% endif %}
+                    </div>
+                    <div class="stat-label">天前活動</div>
+                </div>
+                <div class="stat-card-small">
+                    <div class="stat-icon">📈</div>
+                    <div class="stat-number">{{ summary_data.data.engagement_score or '--' }}</div>
+                    <div class="stat-label">參與度</div>
+                </div>
+            </div>
+            
+            <div class="action-buttons text-center">
+                <a href="/students/{{ student.id }}" class="btn btn-secondary">
+                    📝 查看完整記錄
+                </a>
+                <button onclick="downloadStudentQuestions({{ student.id }})" class="btn btn-primary">
+                    📥 下載提問記錄
+                </button>
+                <button onclick="shareStudentSummary()" class="btn btn-success">
+                    📤 分享摘要
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/progress.js"></script>
+    <script src="/static/js/ui-helpers.js"></script>
+    <script>
+        function retryAnalysis() {
+            showProgress('重新分析', 'AI正在重新分析學習記錄...', 0);
+            
+            setTimeout(() => updateProgress('分析學習模式...', 30), 1000);
+            setTimeout(() => updateProgress('生成個人化洞察...', 70), 2000);
+            setTimeout(() => updateProgress('完成分析！', 100), 3000);
+            setTimeout(() => {
+                hideProgress();
+                window.location.reload();
+            }, 3500);
+        }
+        
+        function shareStudentSummary() {
+            const summaryText = document.querySelector('.summary-content').textContent;
+            const shareData = {
+                title: '{{ student.name }} 的學習摘要',
+                text: summaryText.substring(0, 200) + '...',
+                url: window.location.href
+            };
+            
+            if (navigator.share) {
+                navigator.share(shareData);
+            } else {
+                copyToClipboard(window.location.href);
+                showSuccess('摘要連結已複製到剪貼簿');
+            }
+        }
+        
+        function toggleMobileNav() {
+            const menu = document.getElementById('mobile-menu');
+            menu.classList.toggle('active');
+        }
+    </script>
+</body>
+</html>
