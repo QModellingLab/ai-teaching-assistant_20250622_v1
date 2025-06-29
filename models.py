@@ -1,11 +1,12 @@
-# =================== models.py 優化版 - 完整版開始 ===================
-# EMI智能教學助理系統 - 資料模型定義（與app.py v4.0兼容）
-# 支援優化的註冊流程，移除快取依賴
+# =================== models.py 更新版 - 第1段開始 ===================
+# EMI智能教學助理系統 - 資料模型定義（增加記憶功能和學習歷程）
+# 支援優化的註冊流程，移除快取依賴，新增會話追蹤和學習歷程
 # 更新日期：2025年6月29日
 
 import os
 import datetime
 import logging
+import json
 from peewee import *
 
 logger = logging.getLogger(__name__)
@@ -221,99 +222,189 @@ class Student(BaseModel):
             return 0
         return (datetime.datetime.now() - self.created_at).days
     
-    # =================== 演示資料管理（保留） ===================
+    # =================== 會話相關方法（新增） ===================
     
-    @property
-    def is_demo_student(self):
-        """檢查是否為演示學生"""
-        return (self.name.startswith('[DEMO]') or 
-                self.line_user_id.startswith('demo_') or
-                self.name.startswith('學生_'))
-    
-    @property
-    def is_real_student(self):
-        """檢查是否為真實學生"""
-        return not self.is_demo_student
-    
-    @classmethod
-    def get_real_students(cls):
-        """取得所有真實學生"""
-        return cls.select().where(
-            (~cls.name.startswith('[DEMO]')) &
-            (~cls.line_user_id.startswith('demo_')) &
-            (~cls.name.startswith('學生_'))
-        )
-    
-    @classmethod
-    def get_demo_students(cls):
-        """取得所有演示學生"""
-        return cls.select().where(
-            (cls.name.startswith('[DEMO]')) |
-            (cls.line_user_id.startswith('demo_')) |
-            (cls.name.startswith('學生_'))
-        )
-    
-    @classmethod
-    def cleanup_demo_students(cls):
-        """清理演示學生及其相關資料"""
+    def get_active_session(self):
+        """取得目前的活躍會話"""
         try:
-            demo_students = list(cls.get_demo_students())
-            
-            if not demo_students:
-                return {
-                    'success': True,
-                    'students_deleted': 0,
-                    'messages_deleted': 0,
-                    'message': '沒有找到演示學生'
-                }
-            
-            deleted_counts = {
-                'students': 0,
-                'messages': 0,
-                'analyses': 0
-            }
-            
-            # 為每個演示學生清理相關資料
-            for student in demo_students:
-                # 刪除訊息
-                deleted_counts['messages'] += Message.delete().where(
-                    Message.student == student
-                ).execute()
-                
-                # 刪除分析記錄（如果存在）
-                try:
-                    deleted_counts['analyses'] += Analysis.delete().where(
-                        Analysis.student == student
-                    ).execute()
-                except:
-                    pass  # 如果 Analysis 表不存在就跳過
-                
-                # 最後刪除學生本身
-                student.delete_instance()
-                deleted_counts['students'] += 1
-            
-            logger.info(f"成功清理 {deleted_counts['students']} 個演示學生及其相關資料")
-            
-            return {
-                'success': True,
-                'students_deleted': deleted_counts['students'],
-                'messages_deleted': deleted_counts['messages'],
-                'analyses_deleted': deleted_counts['analyses'],
-                'message': f"成功清理 {deleted_counts['students']} 個演示學生及所有相關資料"
-            }
-            
+            return ConversationSession.select().where(
+                ConversationSession.student == self,
+                ConversationSession.session_end.is_null()
+            ).order_by(ConversationSession.session_start.desc()).first()
         except Exception as e:
-            logger.error(f"清理演示學生錯誤: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'message': '清理演示學生時發生錯誤'
-            }
+            logger.error(f"❌ 取得活躍會話失敗: {e}")
+            return None
+    
+    def start_new_session(self, topic_hint=None):
+        """開始新的對話會話"""
+        try:
+            # 先結束任何現有的活躍會話
+            active_session = self.get_active_session()
+            if active_session:
+                active_session.end_session()
+            
+            # 創建新會話
+            session = ConversationSession.create(
+                student=self,
+                session_start=datetime.datetime.now(),
+                topic_hint=topic_hint or ''
+            )
+            logger.info(f"✅ 學生 {self.name} 開始新會話 (ID: {session.id})")
+            return session
+        except Exception as e:
+            logger.error(f"❌ 開始新會話失敗: {e}")
+            return None
+    
+    def get_recent_sessions(self, limit=5):
+        """取得最近的對話會話"""
+        try:
+            return list(ConversationSession.select().where(
+                ConversationSession.student == self
+            ).order_by(ConversationSession.session_start.desc()).limit(limit))
+        except Exception as e:
+            logger.error(f"❌ 取得最近會話失敗: {e}")
+            return []
+    
+    def get_session_count(self):
+        """取得總會話次數"""
+        try:
+            return ConversationSession.select().where(ConversationSession.student == self).count()
+        except Exception as e:
+            logger.error(f"❌ 取得會話次數失敗: {e}")
+            return 0
 
-# =================== 訊息模型（與app.py完全兼容） ===================
+# =================== 對話會話模型（新增） ===================
+
+class ConversationSession(BaseModel):
+    """對話會話模型 - 追蹤連續的對話會話"""
+    
+    id = AutoField(primary_key=True)
+    student = ForeignKeyField(Student, backref='conversation_sessions', verbose_name="學生")
+    session_start = DateTimeField(default=datetime.datetime.now, verbose_name="會話開始時間")
+    session_end = DateTimeField(null=True, verbose_name="會話結束時間")
+    topic_hint = CharField(max_length=200, default='', verbose_name="主題提示")
+    topic_summary = TextField(null=True, verbose_name="主題摘要")
+    message_count = IntegerField(default=0, verbose_name="訊息數量")
+    created_at = DateTimeField(default=datetime.datetime.now, verbose_name="建立時間")
+    
+    class Meta:
+        table_name = 'conversation_sessions'
+        indexes = (
+            (('student', 'session_start'), False),
+            (('session_start',), False),
+            (('session_end',), False),
+        )
+    
+    def __str__(self):
+        status = "進行中" if not self.session_end else "已結束"
+        return f"Session({self.student.name}, {status}, {self.session_start})"
+    
+    def is_active(self):
+        """檢查會話是否仍在進行中"""
+        return self.session_end is None
+    
+    def get_duration_minutes(self):
+        """取得會話持續時間（分鐘）"""
+        if not self.session_end:
+            end_time = datetime.datetime.now()
+        else:
+            end_time = self.session_end
+        
+        duration = end_time - self.session_start
+        return duration.total_seconds() / 60
+    
+    def end_session(self, topic_summary=None):
+        """結束會話"""
+        try:
+            self.session_end = datetime.datetime.now()
+            if topic_summary:
+                self.topic_summary = topic_summary
+            
+            # 更新訊息計數
+            self.update_message_count()
+            self.save()
+            
+            logger.info(f"✅ 結束會話 (ID: {self.id})，持續 {self.get_duration_minutes():.1f} 分鐘")
+        except Exception as e:
+            logger.error(f"❌ 結束會話失敗: {e}")
+    
+    def update_message_count(self):
+        """更新會話中的訊息計數"""
+        try:
+            self.message_count = Message.select().where(
+                Message.session == self
+            ).count()
+            self.save()
+        except Exception as e:
+            logger.error(f"❌ 更新會話訊息計數失敗: {e}")
+    
+    def get_messages(self):
+        """取得會話中的所有訊息"""
+        try:
+            return list(Message.select().where(
+                Message.session == self
+            ).order_by(Message.timestamp))
+        except Exception as e:
+            logger.error(f"❌ 取得會話訊息失敗: {e}")
+            return []
+    
+    def should_auto_end(self, timeout_minutes=30):
+        """檢查是否應該自動結束會話（基於時間）"""
+        if self.session_end:
+            return False  # 已經結束
+        
+        time_since_start = datetime.datetime.now() - self.session_start
+        return time_since_start.total_seconds() > (timeout_minutes * 60)
+    
+    @classmethod
+    def cleanup_old_sessions(cls, days_old=30):
+        """清理過舊的會話記錄"""
+        try:
+            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_old)
+            deleted_count = cls.delete().where(
+                cls.session_start < cutoff_date
+            ).execute()
+            
+            if deleted_count > 0:
+                logger.info(f"✅ 清理了 {deleted_count} 個舊會話記錄")
+            
+            return deleted_count
+        except Exception as e:
+            logger.error(f"❌ 清理舊會話失敗: {e}")
+            return 0
+    
+    @classmethod
+    def auto_end_inactive_sessions(cls, timeout_minutes=30):
+        """自動結束非活躍的會話"""
+        try:
+            cutoff_time = datetime.datetime.now() - datetime.timedelta(minutes=timeout_minutes)
+            
+            inactive_sessions = cls.select().where(
+                cls.session_end.is_null(),
+                cls.session_start < cutoff_time
+            )
+            
+            ended_count = 0
+            for session in inactive_sessions:
+                session.end_session("自動結束（非活躍）")
+                ended_count += 1
+            
+            if ended_count > 0:
+                logger.info(f"✅ 自動結束了 {ended_count} 個非活躍會話")
+            
+            return ended_count
+        except Exception as e:
+            logger.error(f"❌ 自動結束會話失敗: {e}")
+            return 0
+
+# =================== models.py 更新版 - 第1段結束 ===================
+
+# =================== models.py 更新版 - 第2段開始 ===================
+
+# =================== 訊息模型（增強版，支援會話追蹤） ===================
 
 class Message(BaseModel):
-    """訊息模型 - 與app.py v4.0完全兼容"""
+    """訊息模型 - 增強版，支援會話追蹤和主題標籤"""
     
     id = AutoField(primary_key=True)
     student = ForeignKeyField(Student, backref='messages', verbose_name="學生")
@@ -322,26 +413,50 @@ class Message(BaseModel):
     source_type = CharField(max_length=20, default='student', verbose_name="來源類型")
     # 支援的類型：'student', 'line', 'ai'
     
+    # ✨ 新增：會話追蹤
+    session = ForeignKeyField(ConversationSession, null=True, backref='messages', verbose_name="所屬會話")
+    
+    # ✨ 新增：主題標籤（用於記憶功能）
+    topic_tags = CharField(max_length=500, default='', verbose_name="主題標籤")
+    
+    # ✨ 新增：AI回應（如果這是學生訊息，可以儲存對應的AI回應）
+    ai_response = TextField(null=True, verbose_name="AI回應")
+    
     class Meta:
         table_name = 'messages'
         indexes = (
             (('student', 'timestamp'), False),
             (('timestamp',), False),
             (('source_type',), False),
+            (('session',), False),  # 新增：會話索引
         )
     
     def __str__(self):
-        return f"Message({self.student.name}, {self.source_type}, {self.timestamp})"
+        session_info = f", 會話{self.session.id}" if self.session else ""
+        return f"Message({self.student.name}, {self.source_type}, {self.timestamp}{session_info})"
     
     @classmethod
     def create(cls, **data):
-        """創建訊息（覆寫以添加日誌和規範化來源類型）"""
+        """創建訊息（覆寫以添加會話管理和統計更新）"""
         try:
             # 規範化來源類型（與app.py兼容）
             if 'source_type' in data:
                 source = data['source_type']
                 if source == 'line':
                     data['source_type'] = 'student'  # 統一使用'student'
+            
+            # 處理會話關聯
+            if 'session' not in data or data['session'] is None:
+                student = data.get('student')
+                if student and data.get('source_type') == 'student':
+                    # 如果是學生訊息，嘗試關聯到活躍會話或創建新會話
+                    active_session = student.get_active_session()
+                    if not active_session:
+                        # 如果沒有活躍會話，創建新會話
+                        active_session = student.start_new_session()
+                    
+                    if active_session:
+                        data['session'] = active_session
             
             message = super().create(**data)
             logger.debug(f"創建訊息: {message.student.name} - {message.source_type}")
@@ -354,10 +469,53 @@ class Message(BaseModel):
             except Exception as e:
                 logger.warning(f"更新學生統計失敗: {e}")
             
+            # 更新會話的訊息計數
+            if message.session:
+                try:
+                    message.session.update_message_count()
+                except Exception as e:
+                    logger.warning(f"更新會話統計失敗: {e}")
+            
             return message
         except Exception as e:
             logger.error(f"❌ 創建訊息失敗: {e}")
             raise
+    
+    def add_topic_tags(self, tags):
+        """添加主題標籤"""
+        try:
+            if isinstance(tags, list):
+                new_tags = ','.join(tags)
+            else:
+                new_tags = str(tags)
+            
+            if self.topic_tags:
+                existing_tags = set(self.topic_tags.split(','))
+                new_tags_set = set(new_tags.split(','))
+                combined_tags = existing_tags.union(new_tags_set)
+                self.topic_tags = ','.join(combined_tags)
+            else:
+                self.topic_tags = new_tags
+            
+            self.save()
+            logger.debug(f"更新訊息主題標籤: {self.topic_tags}")
+        except Exception as e:
+            logger.error(f"❌ 添加主題標籤失敗: {e}")
+    
+    def get_topic_tags_list(self):
+        """取得主題標籤列表"""
+        if not self.topic_tags:
+            return []
+        return [tag.strip() for tag in self.topic_tags.split(',') if tag.strip()]
+    
+    def set_ai_response(self, response_text):
+        """設定AI回應"""
+        try:
+            self.ai_response = response_text
+            self.save()
+            logger.debug(f"設定AI回應長度: {len(response_text)} 字")
+        except Exception as e:
+            logger.error(f"❌ 設定AI回應失敗: {e}")
     
     @property
     def is_demo_message(self):
@@ -398,6 +556,56 @@ class Message(BaseModel):
         )
     
     @classmethod
+    def get_conversation_context(cls, student, limit=5):
+        """取得學生的對話上下文（用於記憶功能）"""
+        try:
+            recent_messages = list(cls.select().where(
+                cls.student == student
+            ).order_by(cls.timestamp.desc()).limit(limit))
+            
+            context = {
+                'recent_topics': [],
+                'conversation_flow': [],
+                'session_info': None
+            }
+            
+            for msg in reversed(recent_messages):  # 按時間順序排列
+                context['conversation_flow'].append({
+                    'content': msg.content,
+                    'ai_response': msg.ai_response,
+                    'timestamp': msg.timestamp.isoformat(),
+                    'source_type': msg.source_type,
+                    'topic_tags': msg.get_topic_tags_list()
+                })
+                
+                # 收集主題標籤
+                context['recent_topics'].extend(msg.get_topic_tags_list())
+            
+            # 去重並保留最近的主題
+            context['recent_topics'] = list(dict.fromkeys(context['recent_topics']))[-10:]
+            
+            # 取得目前會話資訊
+            if recent_messages:
+                latest_session = recent_messages[0].session
+                if latest_session and latest_session.is_active():
+                    context['session_info'] = {
+                        'session_id': latest_session.id,
+                        'start_time': latest_session.session_start.isoformat(),
+                        'topic_hint': latest_session.topic_hint,
+                        'message_count': latest_session.message_count
+                    }
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"❌ 取得對話上下文失敗: {e}")
+            return {
+                'recent_topics': [],
+                'conversation_flow': [],
+                'session_info': None
+            }
+    
+    @classmethod
     def cleanup_demo_messages(cls):
         """清理所有演示訊息"""
         try:
@@ -431,10 +639,205 @@ class Message(BaseModel):
                 'message': '清理演示訊息時發生錯誤'
             }
 
+# =================== 學習歷程模型（新增） ===================
+
+class LearningHistory(BaseModel):
+    """學習歷程模型 - 記錄學生的學習歷程和發展軌跡"""
+    
+    id = AutoField(primary_key=True)
+    student = ForeignKeyField(Student, backref='learning_histories', verbose_name="學生")
+    
+    # 學習歷程內容
+    topics_discussed = TextField(default='{}', verbose_name="討論主題（JSON格式）")
+    learning_progression = TextField(default='{}', verbose_name="學習軌跡（JSON格式）")
+    key_interactions = TextField(default='{}', verbose_name="關鍵互動（JSON格式）")
+    depth_analysis = TextField(verbose_name="深度分析文本")
+    
+    # 統計資訊
+    total_sessions = IntegerField(default=0, verbose_name="總會話次數")
+    total_messages = IntegerField(default=0, verbose_name="總訊息數")
+    analysis_period_start = DateTimeField(verbose_name="分析期間開始")
+    analysis_period_end = DateTimeField(verbose_name="分析期間結束")
+    
+    # 元資料
+    generated_at = DateTimeField(default=datetime.datetime.now, verbose_name="生成時間")
+    generated_by = CharField(max_length=50, default='system', verbose_name="生成者")
+    version = CharField(max_length=10, default='1.0', verbose_name="版本")
+    
+    class Meta:
+        table_name = 'learning_histories'
+        indexes = (
+            (('student', 'generated_at'), False),
+            (('generated_at',), False),
+            (('student',), False),
+        )
+    
+    def __str__(self):
+        return f"LearningHistory({self.student.name}, {self.generated_at})"
+    
+    def set_topics_discussed(self, topics_data):
+        """設定討論主題資料"""
+        try:
+            if isinstance(topics_data, dict):
+                self.topics_discussed = json.dumps(topics_data, ensure_ascii=False)
+            else:
+                self.topics_discussed = str(topics_data)
+            self.save()
+            logger.debug(f"設定學習歷程主題資料")
+        except Exception as e:
+            logger.error(f"❌ 設定主題資料失敗: {e}")
+    
+    def get_topics_discussed(self):
+        """取得討論主題資料"""
+        try:
+            if self.topics_discussed:
+                return json.loads(self.topics_discussed)
+            return {}
+        except Exception as e:
+            logger.error(f"❌ 解析主題資料失敗: {e}")
+            return {}
+    
+    def set_learning_progression(self, progression_data):
+        """設定學習軌跡資料"""
+        try:
+            if isinstance(progression_data, dict):
+                self.learning_progression = json.dumps(progression_data, ensure_ascii=False)
+            else:
+                self.learning_progression = str(progression_data)
+            self.save()
+            logger.debug(f"設定學習軌跡資料")
+        except Exception as e:
+            logger.error(f"❌ 設定學習軌跡失敗: {e}")
+    
+    def get_learning_progression(self):
+        """取得學習軌跡資料"""
+        try:
+            if self.learning_progression:
+                return json.loads(self.learning_progression)
+            return {}
+        except Exception as e:
+            logger.error(f"❌ 解析學習軌跡失敗: {e}")
+            return {}
+    
+    def set_key_interactions(self, interactions_data):
+        """設定關鍵互動資料"""
+        try:
+            if isinstance(interactions_data, dict):
+                self.key_interactions = json.dumps(interactions_data, ensure_ascii=False)
+            else:
+                self.key_interactions = str(interactions_data)
+            self.save()
+            logger.debug(f"設定關鍵互動資料")
+        except Exception as e:
+            logger.error(f"❌ 設定關鍵互動失敗: {e}")
+    
+    def get_key_interactions(self):
+        """取得關鍵互動資料"""
+        try:
+            if self.key_interactions:
+                return json.loads(self.key_interactions)
+            return {}
+        except Exception as e:
+            logger.error(f"❌ 解析關鍵互動失敗: {e}")
+            return {}
+    
+    def update_statistics(self):
+        """更新統計資訊"""
+        try:
+            # 計算學生的總會話次數和訊息數
+            self.total_sessions = ConversationSession.select().where(
+                ConversationSession.student == self.student
+            ).count()
+            
+            self.total_messages = Message.select().where(
+                Message.student == self.student
+            ).count()
+            
+            # 設定分析期間
+            if not self.analysis_period_start:
+                first_message = Message.select().where(
+                    Message.student == self.student
+                ).order_by(Message.timestamp).first()
+                if first_message:
+                    self.analysis_period_start = first_message.timestamp
+                else:
+                    self.analysis_period_start = datetime.datetime.now()
+            
+            self.analysis_period_end = datetime.datetime.now()
+            self.save()
+            
+            logger.debug(f"更新學習歷程統計: {self.total_sessions} 會話, {self.total_messages} 訊息")
+        except Exception as e:
+            logger.error(f"❌ 更新統計資訊失敗: {e}")
+    
+    def get_analysis_summary(self):
+        """取得分析摘要"""
+        return {
+            'student_name': self.student.name,
+            'student_id': getattr(self.student, 'student_id', ''),
+            'total_sessions': self.total_sessions,
+            'total_messages': self.total_messages,
+            'analysis_period': {
+                'start': self.analysis_period_start.isoformat() if self.analysis_period_start else None,
+                'end': self.analysis_period_end.isoformat() if self.analysis_period_end else None,
+                'days': (self.analysis_period_end - self.analysis_period_start).days if self.analysis_period_start and self.analysis_period_end else 0
+            },
+            'topics_discussed': self.get_topics_discussed(),
+            'learning_progression': self.get_learning_progression(),
+            'key_interactions': self.get_key_interactions(),
+            'generated_at': self.generated_at.isoformat(),
+            'version': self.version
+        }
+    
+    @classmethod
+    def get_latest_for_student(cls, student):
+        """取得學生的最新學習歷程"""
+        try:
+            return cls.select().where(
+                cls.student == student
+            ).order_by(cls.generated_at.desc()).first()
+        except Exception as e:
+            logger.error(f"❌ 取得最新學習歷程失敗: {e}")
+            return None
+    
+    @classmethod
+    def cleanup_old_histories(cls, keep_latest=3, days_old=90):
+        """清理過舊的學習歷程記錄"""
+        try:
+            deleted_count = 0
+            
+            # 為每個學生保留最新的N個記錄
+            students = Student.select()
+            for student in students:
+                histories = list(cls.select().where(
+                    cls.student == student
+                ).order_by(cls.generated_at.desc()))
+                
+                # 刪除超過保留數量的記錄
+                if len(histories) > keep_latest:
+                    for history in histories[keep_latest:]:
+                        history.delete_instance()
+                        deleted_count += 1
+            
+            # 額外刪除非常舊的記錄
+            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_old)
+            old_deleted = cls.delete().where(
+                cls.generated_at < cutoff_date
+            ).execute()
+            deleted_count += old_deleted
+            
+            if deleted_count > 0:
+                logger.info(f"✅ 清理了 {deleted_count} 個舊學習歷程記錄")
+            
+            return deleted_count
+        except Exception as e:
+            logger.error(f"❌ 清理舊學習歷程失敗: {e}")
+            return 0
+
 # =================== 分析模型（保留但簡化） ===================
 
 class Analysis(BaseModel):
-    """分析模型 - 保留但簡化"""
+    """分析模型 - 保留但簡化，主要用於向後相容"""
     
     id = AutoField(primary_key=True)
     student = ForeignKeyField(Student, backref='analyses', verbose_name="學生")
@@ -515,19 +918,26 @@ class Analysis(BaseModel):
                 'message': '清理演示分析時發生錯誤'
             }
 
+# =================== models.py 更新版 - 第2段結束 ===================
+
+# =================== models.py 更新版 - 第3段開始 ===================
+
 # =================== 資料庫初始化和管理 ===================
 
 def initialize_db():
-    """初始化資料庫"""
+    """初始化資料庫（包含新增的會話和學習歷程表）"""
     try:
         # 連接資料庫
         if db.is_closed():
             db.connect()
             logger.info("✅ 資料庫連接建立")
         
-        # 創建所有表格
-        db.create_tables([Student, Message, Analysis], safe=True)
-        logger.info("✅ 資料庫表格初始化完成")
+        # 創建所有表格（包含新增的表格）
+        db.create_tables([
+            Student, Message, Analysis,           # 原有表格
+            ConversationSession, LearningHistory  # 新增表格
+        ], safe=True)
+        logger.info("✅ 資料庫表格初始化完成（包含會話和學習歷程表）")
         
         return True
         
@@ -544,12 +954,14 @@ def close_db():
     except Exception as e:
         logger.error(f"❌ 關閉資料庫連接失敗: {e}")
 
-# =================== 資料庫遷移功能（優化版） ===================
+# =================== 資料庫遷移功能（增強版） ===================
 
 def migrate_database():
-    """資料庫遷移 - 添加新欄位並支援新註冊流程"""
+    """資料庫遷移 - 添加新欄位和新表格，支援記憶功能和學習歷程"""
     try:
-        logger.info("🔄 開始資料庫遷移...")
+        logger.info("🔄 開始資料庫遷移（支援記憶功能和學習歷程）...")
+        
+        # === 原有欄位遷移（保持向後相容） ===
         
         # 檢查並添加 student_id 欄位
         try:
@@ -590,6 +1002,58 @@ def migrate_database():
             else:
                 logger.warning(f"⚠️ 添加 grade 欄位時出現問題: {e}")
         
+        # === 新增欄位遷移（記憶功能相關） ===
+        
+        # 為 messages 表添加 session 欄位
+        try:
+            if isinstance(db, SqliteDatabase):
+                db.execute_sql('ALTER TABLE messages ADD COLUMN session_id INTEGER')
+            else:
+                db.execute_sql('ALTER TABLE messages ADD COLUMN session_id INTEGER REFERENCES conversation_sessions(id)')
+            logger.info("✅ 成功添加 messages.session_id 欄位")
+        except Exception as e:
+            if 'duplicate column name' in str(e).lower() or 'already exists' in str(e).lower():
+                logger.info("✅ messages.session_id 欄位已經存在")
+            else:
+                logger.warning(f"⚠️ 添加 messages.session_id 欄位時出現問題: {e}")
+        
+        # 為 messages 表添加 topic_tags 欄位
+        try:
+            if isinstance(db, SqliteDatabase):
+                db.execute_sql('ALTER TABLE messages ADD COLUMN topic_tags VARCHAR(500) DEFAULT ""')
+            else:
+                db.execute_sql('ALTER TABLE messages ADD COLUMN topic_tags VARCHAR(500) DEFAULT ""')
+            logger.info("✅ 成功添加 messages.topic_tags 欄位")
+        except Exception as e:
+            if 'duplicate column name' in str(e).lower() or 'already exists' in str(e).lower():
+                logger.info("✅ messages.topic_tags 欄位已經存在")
+            else:
+                logger.warning(f"⚠️ 添加 messages.topic_tags 欄位時出現問題: {e}")
+        
+        # 為 messages 表添加 ai_response 欄位
+        try:
+            if isinstance(db, SqliteDatabase):
+                db.execute_sql('ALTER TABLE messages ADD COLUMN ai_response TEXT')
+            else:
+                db.execute_sql('ALTER TABLE messages ADD COLUMN ai_response TEXT')
+            logger.info("✅ 成功添加 messages.ai_response 欄位")
+        except Exception as e:
+            if 'duplicate column name' in str(e).lower() or 'already exists' in str(e).lower():
+                logger.info("✅ messages.ai_response 欄位已經存在")
+            else:
+                logger.warning(f"⚠️ 添加 messages.ai_response 欄位時出現問題: {e}")
+        
+        # === 新表格創建 ===
+        
+        # 創建新表格（如果不存在）
+        try:
+            db.create_tables([ConversationSession, LearningHistory], safe=True)
+            logger.info("✅ 成功創建新表格（會話和學習歷程）")
+        except Exception as e:
+            logger.warning(f"⚠️ 創建新表格時出現問題: {e}")
+        
+        # === 資料一致性更新 ===
+        
         # 更新現有學生記錄的預設值
         try:
             # 為沒有 student_id 的學生設定空字串
@@ -602,11 +1066,19 @@ def migrate_database():
                 (Student.registration_step.is_null()) | (Student.registration_step == None)
             ).execute()
             
-            logger.info("✅ 現有學生記錄已更新預設值")
+            # 為沒有 topic_tags 的訊息設定空字串
+            try:
+                Message.update(topic_tags='').where(
+                    (Message.topic_tags.is_null()) | (Message.topic_tags == None)
+                ).execute()
+            except:
+                pass  # 如果欄位不存在就跳過
+            
+            logger.info("✅ 現有記錄已更新預設值")
         except Exception as e:
             logger.warning(f"⚠️ 更新現有記錄時出現問題: {e}")
         
-        logger.info("✅ 資料庫遷移完成")
+        logger.info("✅ 資料庫遷移完成（支援記憶功能和學習歷程）")
         return True
         
     except Exception as e:
@@ -631,10 +1103,46 @@ def reset_registration_for_incomplete_students():
         logger.error(f"❌ 重設註冊狀態失敗: {e}")
         return 0
 
-# =================== 資料庫統計功能（優化版） ===================
+# =================== 會話管理功能（新增） ===================
+
+def manage_conversation_sessions():
+    """管理對話會話，自動清理和結束非活躍會話"""
+    try:
+        # 自動結束非活躍會話（30分鐘無活動）
+        ended_count = ConversationSession.auto_end_inactive_sessions(timeout_minutes=30)
+        
+        # 清理過舊的會話記錄（30天前）
+        cleaned_count = ConversationSession.cleanup_old_sessions(days_old=30)
+        
+        return {
+            'ended_sessions': ended_count,
+            'cleaned_sessions': cleaned_count,
+            'message': f'結束了 {ended_count} 個非活躍會話，清理了 {cleaned_count} 個舊會話'
+        }
+    except Exception as e:
+        logger.error(f"❌ 會話管理失敗: {e}")
+        return {'error': str(e)}
+
+# =================== 學習歷程管理功能（新增） ===================
+
+def manage_learning_histories():
+    """管理學習歷程記錄"""
+    try:
+        # 清理過舊的學習歷程（保留每位學生最新3個，清理90天前的記錄）
+        cleaned_count = LearningHistory.cleanup_old_histories(keep_latest=3, days_old=90)
+        
+        return {
+            'cleaned_histories': cleaned_count,
+            'message': f'清理了 {cleaned_count} 個舊學習歷程記錄'
+        }
+    except Exception as e:
+        logger.error(f"❌ 學習歷程管理失敗: {e}")
+        return {'error': str(e)}
+
+# =================== 資料庫統計功能（增強版） ===================
 
 def get_database_stats():
-    """取得資料庫統計資訊（優化版）"""
+    """取得資料庫統計資訊（增強版，包含會話和學習歷程統計）"""
     try:
         stats = {
             'students': {
@@ -655,6 +1163,19 @@ def get_database_stats():
                 'total': Analysis.select().count(),
                 'real': Analysis.get_real_analyses().count(),
                 'demo': Analysis.get_demo_analyses().count(),
+            },
+            # 新增：會話統計
+            'conversation_sessions': {
+                'total': 0,
+                'active': 0,
+                'completed': 0,
+                'avg_duration_minutes': 0
+            },
+            # 新增：學習歷程統計
+            'learning_histories': {
+                'total': 0,
+                'students_with_history': 0,
+                'latest_generation': None
             }
         }
         
@@ -665,6 +1186,58 @@ def get_database_stats():
             (Student.last_active >= week_ago)
         ).count()
         
+        # 計算會話統計
+        try:
+            total_sessions = ConversationSession.select().count()
+            active_sessions = ConversationSession.select().where(
+                ConversationSession.session_end.is_null()
+            ).count()
+            completed_sessions = total_sessions - active_sessions
+            
+            stats['conversation_sessions'].update({
+                'total': total_sessions,
+                'active': active_sessions,
+                'completed': completed_sessions
+            })
+            
+            # 計算平均會話時間
+            if completed_sessions > 0:
+                completed_session_objects = ConversationSession.select().where(
+                    ConversationSession.session_end.is_null(False)
+                ).limit(100)  # 取樣本計算
+                
+                total_duration = 0
+                count = 0
+                for session in completed_session_objects:
+                    duration = session.get_duration_minutes()
+                    if duration > 0:
+                        total_duration += duration
+                        count += 1
+                
+                if count > 0:
+                    stats['conversation_sessions']['avg_duration_minutes'] = round(total_duration / count, 1)
+        except Exception as e:
+            logger.warning(f"計算會話統計失敗: {e}")
+        
+        # 計算學習歷程統計
+        try:
+            total_histories = LearningHistory.select().count()
+            students_with_history = LearningHistory.select(
+                LearningHistory.student
+            ).distinct().count()
+            
+            latest_history = LearningHistory.select().order_by(
+                LearningHistory.generated_at.desc()
+            ).first()
+            
+            stats['learning_histories'].update({
+                'total': total_histories,
+                'students_with_history': students_with_history,
+                'latest_generation': latest_history.generated_at.isoformat() if latest_history else None
+            })
+        except Exception as e:
+            logger.warning(f"計算學習歷程統計失敗: {e}")
+        
         return stats
         
     except Exception as e:
@@ -672,11 +1245,13 @@ def get_database_stats():
         return {
             'students': {'total': 0, 'real': 0, 'demo': 0, 'registered': 0, 'need_registration': 0, 'active_this_week': 0},
             'messages': {'total': 0, 'real': 0, 'demo': 0, 'student_messages': 0, 'ai_messages': 0},
-            'analyses': {'total': 0, 'real': 0, 'demo': 0}
+            'analyses': {'total': 0, 'real': 0, 'demo': 0},
+            'conversation_sessions': {'total': 0, 'active': 0, 'completed': 0, 'avg_duration_minutes': 0},
+            'learning_histories': {'total': 0, 'students_with_history': 0, 'latest_generation': None}
         }
 
 def cleanup_all_demo_data():
-    """清理所有演示資料"""
+    """清理所有演示資料（包含新增的會話和學習歷程）"""
     try:
         logger.info("🧹 開始清理所有演示資料...")
         
@@ -690,6 +1265,42 @@ def cleanup_all_demo_data():
         analysis_result = Analysis.cleanup_demo_analyses()
         results['analyses'] = analysis_result
         
+        # 清理演示學生的會話記錄
+        try:
+            demo_students = list(Student.get_demo_students())
+            demo_sessions_deleted = 0
+            demo_histories_deleted = 0
+            
+            for student in demo_students:
+                # 刪除該學生的會話記錄
+                student_sessions = ConversationSession.delete().where(
+                    ConversationSession.student == student
+                ).execute()
+                demo_sessions_deleted += student_sessions
+                
+                # 刪除該學生的學習歷程
+                student_histories = LearningHistory.delete().where(
+                    LearningHistory.student == student
+                ).execute()
+                demo_histories_deleted += student_histories
+            
+            results['sessions'] = {
+                'success': True,
+                'sessions_deleted': demo_sessions_deleted,
+                'message': f"成功清理 {demo_sessions_deleted} 個演示會話記錄"
+            }
+            
+            results['histories'] = {
+                'success': True,
+                'histories_deleted': demo_histories_deleted,
+                'message': f"成功清理 {demo_histories_deleted} 個演示學習歷程"
+            }
+            
+        except Exception as e:
+            logger.error(f"清理演示會話和學習歷程失敗: {e}")
+            results['sessions'] = {'success': False, 'error': str(e)}
+            results['histories'] = {'success': False, 'error': str(e)}
+        
         # 清理演示學生（最後執行）
         student_result = Student.cleanup_demo_students()
         results['students'] = student_result
@@ -697,7 +1308,9 @@ def cleanup_all_demo_data():
         total_cleaned = {
             'students': results['students'].get('students_deleted', 0),
             'messages': results['messages'].get('total_deleted', 0),
-            'analyses': results['analyses'].get('analyses_deleted', 0)
+            'analyses': results['analyses'].get('analyses_deleted', 0),
+            'sessions': results.get('sessions', {}).get('sessions_deleted', 0),
+            'histories': results.get('histories', {}).get('histories_deleted', 0)
         }
         
         logger.info(f"✅ 演示資料清理完成: {total_cleaned}")
@@ -706,7 +1319,7 @@ def cleanup_all_demo_data():
             'success': True,
             'total_cleaned': total_cleaned,
             'details': results,
-            'message': f"成功清理演示資料：{total_cleaned['students']}位學生，{total_cleaned['messages']}則訊息，{total_cleaned['analyses']}項分析"
+            'message': f"成功清理演示資料：{total_cleaned['students']}位學生，{total_cleaned['messages']}則訊息，{total_cleaned['analyses']}項分析，{total_cleaned['sessions']}個會話，{total_cleaned['histories']}個學習歷程"
         }
         
     except Exception as e:
@@ -717,10 +1330,14 @@ def cleanup_all_demo_data():
             'message': '清理演示資料時發生錯誤'
         }
 
-# =================== 資料驗證和修復功能（新增） ===================
+# =================== models.py 更新版 - 第3段結束 ===================
+
+# =================== models.py 更新版 - 第4段開始 ===================
+
+# =================== 資料驗證和修復功能（增強版） ===================
 
 def validate_database_integrity():
-    """驗證資料庫完整性"""
+    """驗證資料庫完整性（包含新增的會話和學習歷程檢查）"""
     try:
         validation_report = {
             'timestamp': datetime.datetime.now().isoformat(),
@@ -730,7 +1347,7 @@ def validate_database_integrity():
             'stats': {}
         }
         
-        # 檢查學生資料
+        # === 學生資料檢查 ===
         students = list(Student.select())
         missing_name = sum(1 for s in students if not s.name)
         missing_student_id = sum(1 for s in students if not getattr(s, 'student_id', ''))
@@ -753,20 +1370,84 @@ def validate_database_integrity():
         if incomplete_registration > 0:
             validation_report['issues'].append(f'{incomplete_registration} 位學生尚未完成註冊')
         
-        # 檢查訊息資料
+        # === 訊息資料檢查 ===
         messages = Message.select().count()
-        orphaned_messages = Message.select().join(Student, join_type='LEFT OUTER').where(Student.id.is_null()).count()
+        try:
+            orphaned_messages = Message.select().join(Student, join_type='LEFT OUTER').where(Student.id.is_null()).count()
+        except:
+            orphaned_messages = 0
+        
+        # 檢查會話關聯
+        try:
+            messages_without_session = Message.select().where(
+                Message.source_type == 'student',
+                Message.session.is_null()
+            ).count()
+        except:
+            messages_without_session = 0
         
         validation_report['stats']['messages'] = {
             'total': messages,
-            'orphaned': orphaned_messages
+            'orphaned': orphaned_messages,
+            'without_session': messages_without_session
         }
         
         if orphaned_messages > 0:
             validation_report['issues'].append(f'{orphaned_messages} 則訊息缺少對應學生')
             validation_report['recommendations'].append('清理孤立的訊息記錄')
         
-        # 決定整體狀態
+        if messages_without_session > 0:
+            validation_report['issues'].append(f'{messages_without_session} 則學生訊息未關聯到會話')
+            validation_report['recommendations'].append('為學生訊息創建會話關聯')
+        
+        # === 會話資料檢查 ===
+        try:
+            total_sessions = ConversationSession.select().count()
+            active_sessions = ConversationSession.select().where(
+                ConversationSession.session_end.is_null()
+            ).count()
+            
+            # 檢查過長的活躍會話
+            long_active_sessions = ConversationSession.select().where(
+                ConversationSession.session_end.is_null(),
+                ConversationSession.session_start < (datetime.datetime.now() - datetime.timedelta(hours=24))
+            ).count()
+            
+            validation_report['stats']['sessions'] = {
+                'total': total_sessions,
+                'active': active_sessions,
+                'long_active': long_active_sessions
+            }
+            
+            if long_active_sessions > 0:
+                validation_report['issues'].append(f'{long_active_sessions} 個會話活躍時間超過24小時')
+                validation_report['recommendations'].append('使用 manage_conversation_sessions() 清理長時間活躍的會話')
+        
+        except Exception as e:
+            validation_report['stats']['sessions'] = {'error': str(e)}
+        
+        # === 學習歷程資料檢查 ===
+        try:
+            total_histories = LearningHistory.select().count()
+            students_with_multiple_histories = LearningHistory.select(
+                LearningHistory.student
+            ).group_by(LearningHistory.student).having(
+                fn.COUNT(LearningHistory.id) > 5
+            ).count()
+            
+            validation_report['stats']['learning_histories'] = {
+                'total': total_histories,
+                'students_with_multiple': students_with_multiple_histories
+            }
+            
+            if students_with_multiple_histories > 0:
+                validation_report['issues'].append(f'{students_with_multiple_histories} 位學生有超過5個學習歷程記錄')
+                validation_report['recommendations'].append('使用 manage_learning_histories() 清理過多的學習歷程記錄')
+        
+        except Exception as e:
+            validation_report['stats']['learning_histories'] = {'error': str(e)}
+        
+        # === 決定整體狀態 ===
         if validation_report['issues']:
             validation_report['overall_status'] = 'warning'
         
@@ -784,7 +1465,7 @@ def validate_database_integrity():
         }
 
 def fix_database_issues():
-    """修復常見的資料庫問題"""
+    """修復常見的資料庫問題（包含新增功能的修復）"""
     try:
         fix_report = {
             'timestamp': datetime.datetime.now().isoformat(),
@@ -792,7 +1473,7 @@ def fix_database_issues():
             'errors': []
         }
         
-        # 修復1：清理孤立的訊息
+        # === 修復1：清理孤立的訊息 ===
         try:
             orphaned_count = Message.delete().join(Student, join_type='LEFT OUTER').where(Student.id.is_null()).execute()
             if orphaned_count > 0:
@@ -800,7 +1481,7 @@ def fix_database_issues():
         except Exception as e:
             fix_report['errors'].append(f'清理孤立訊息失敗: {str(e)}')
         
-        # 修復2：重設不完整的註冊
+        # === 修復2：重設不完整的註冊 ===
         try:
             reset_count = reset_registration_for_incomplete_students()
             if reset_count > 0:
@@ -808,7 +1489,7 @@ def fix_database_issues():
         except Exception as e:
             fix_report['errors'].append(f'重設註冊狀態失敗: {str(e)}')
         
-        # 修復3：更新訊息計數
+        # === 修復3：更新訊息計數 ===
         try:
             students = Student.select()
             updated_count = 0
@@ -823,6 +1504,53 @@ def fix_database_issues():
         except Exception as e:
             fix_report['errors'].append(f'更新訊息計數失敗: {str(e)}')
         
+        # === 修復4：為學生訊息創建會話關聯 ===
+        try:
+            messages_without_session = Message.select().where(
+                Message.source_type == 'student',
+                Message.session.is_null()
+            )
+            
+            created_sessions = 0
+            current_student = None
+            current_session = None
+            
+            for message in messages_without_session.order_by(Message.student, Message.timestamp):
+                if message.student != current_student:
+                    # 為新學生創建新會話
+                    current_student = message.student
+                    current_session = ConversationSession.create(
+                        student=current_student,
+                        session_start=message.timestamp,
+                        topic_hint='歷史訊息會話'
+                    )
+                    created_sessions += 1
+                
+                # 關聯訊息到會話
+                message.session = current_session
+                message.save()
+            
+            if created_sessions > 0:
+                fix_report['fixes_applied'].append(f'為歷史訊息創建了 {created_sessions} 個會話')
+        except Exception as e:
+            fix_report['errors'].append(f'創建會話關聯失敗: {str(e)}')
+        
+        # === 修復5：自動結束長時間活躍的會話 ===
+        try:
+            session_management = manage_conversation_sessions()
+            if 'ended_sessions' in session_management and session_management['ended_sessions'] > 0:
+                fix_report['fixes_applied'].append(f"自動結束了 {session_management['ended_sessions']} 個長時間活躍會話")
+        except Exception as e:
+            fix_report['errors'].append(f'會話管理失敗: {str(e)}')
+        
+        # === 修復6：清理過多的學習歷程記錄 ===
+        try:
+            history_management = manage_learning_histories()
+            if 'cleaned_histories' in history_management and history_management['cleaned_histories'] > 0:
+                fix_report['fixes_applied'].append(f"清理了 {history_management['cleaned_histories']} 個舊學習歷程記錄")
+        except Exception as e:
+            fix_report['errors'].append(f'學習歷程管理失敗: {str(e)}')
+        
         return fix_report
         
     except Exception as e:
@@ -831,6 +1559,26 @@ def fix_database_issues():
             'timestamp': datetime.datetime.now().isoformat(),
             'error': str(e)
         }
+
+# =================== 演示學生擴展方法（新增會話和學習歷程支援） ===================
+
+def get_student_demo_data_summary(student):
+    """取得學生的演示資料摘要（包含會話和學習歷程）"""
+    try:
+        return {
+            'student_info': {
+                'name': student.name,
+                'line_user_id': student.line_user_id,
+                'is_demo': student.is_demo_student
+            },
+            'messages': Message.select().where(Message.student == student).count(),
+            'analyses': Analysis.select().where(Analysis.student == student).count(),
+            'sessions': ConversationSession.select().where(ConversationSession.student == student).count(),
+            'learning_histories': LearningHistory.select().where(LearningHistory.student == student).count()
+        }
+    except Exception as e:
+        logger.error(f"❌ 取得學生演示資料摘要失敗: {e}")
+        return {}
 
 # =================== 相容性和初始化 ===================
 
@@ -851,7 +1599,7 @@ if __name__ != '__main__':
         # 重設不完整的註冊狀態
         reset_registration_for_incomplete_students()
         
-        logger.info("✅ models.py 自動初始化完成")
+        logger.info("✅ models.py 自動初始化完成（支援記憶功能和學習歷程）")
         
     except Exception as e:
         logger.error(f"❌ models.py 自動初始化失敗: {e}")
@@ -863,6 +1611,9 @@ __all__ = [
     'db', 'BaseModel', 
     'Student', 'Message', 'Analysis',
     
+    # 新增類別
+    'ConversationSession', 'LearningHistory',
+    
     # 資料庫管理函數
     'initialize_db', 'init_database', 'initialize_database', 'create_tables', 'close_db',
     'migrate_database', 'reset_registration_for_incomplete_students',
@@ -870,56 +1621,74 @@ __all__ = [
     # 統計和清理函數
     'get_database_stats', 'cleanup_all_demo_data',
     
-    # 驗證和修復函數（新增）
-    'validate_database_integrity', 'fix_database_issues'
+    # 驗證和修復函數
+    'validate_database_integrity', 'fix_database_issues',
+    
+    # 新增管理函數
+    'manage_conversation_sessions', 'manage_learning_histories',
+    'get_student_demo_data_summary'
 ]
 
 # =================== 版本說明 ===================
 
 """
-EMI 智能教學助理系統 - models.py 優化版
+EMI 智能教學助理系統 - models.py 更新版
 =====================================
 
-🎯 優化重點:
-- ✨ 完全支援 app.py v4.0 的新註冊流程
-- ✨ 新增註冊狀態管理方法
-- ✨ 新增資料驗證和修復功能
-- ❌ 移除快取依賴，簡化統計邏輯
-- 🔧 增強錯誤處理和日誌記錄
+🎯 更新重點:
+- ✨ 新增 ConversationSession 模型：支援對話會話追蹤和記憶功能
+- ✨ 新增 LearningHistory 模型：支援學習歷程記錄和分析
+- ✨ 增強 Message 模型：新增會話關聯、主題標籤、AI回應欄位
+- ✨ 保持完全向後相容：所有原有功能維持不變
+- 🔧 增強資料庫遷移：自動添加新欄位和新表格
 
 ✨ 新增功能:
-- 註冊流程追蹤：0=完成, 1=等待學號, 2=等待姓名, 3=等待確認
-- 學號欄位：完整支援學號儲存和驗證
-- 註冊狀態管理：is_registered(), needs_registration(), get_registration_status()
-- 資料完整性檢查：validate_database_integrity(), fix_database_issues()
-- 自動統計更新：訊息計數和活動時間自動維護
+- 對話會話追蹤：支援連續對話的記憶功能
+- 學習歷程生成：深度分析學生學習軌跡和發展
+- 主題標籤系統：自動識別和標記討論主題
+- 會話管理：自動結束非活躍會話，清理舊記錄
+- 增強統計：包含會話和學習歷程的完整統計
 
-🗂️ 資料模型:
-- Student: 學生基本資料 + 完整註冊狀態支援
-- Message: 對話記錄（支援'student', 'line', 'ai'來源類型）
-- Analysis: 分析記錄（保留但簡化）
+🗂️ 資料模型更新:
+- Student: 新增會話相關方法（get_active_session, start_new_session等）
+- Message: 新增 session, topic_tags, ai_response 欄位
+- ConversationSession: 全新模型，管理對話會話
+- LearningHistory: 全新模型，記錄學習歷程
+- Analysis: 保持不變，向後相容
 
 🔄 資料庫遷移:
-- 自動添加所需新欄位
-- 保持現有資料完整性
-- 完整向後相容性
+- 自動添加新欄位：session_id, topic_tags, ai_response
+- 自動創建新表格：conversation_sessions, learning_histories  
+- 向後相容性：所有現有資料保持完整
+- 智慧修復：自動為歷史訊息創建會話關聯
 
-📊 統計功能:
-- 基本計數統計
-- 註冊狀態統計
-- 演示資料管理
-- 資料清理和修復
+📊 統計功能增強:
+- 會話統計：總數、活躍、平均時長
+- 學習歷程統計：生成數量、覆蓋學生數
+- 增強清理：支援演示會話和學習歷程清理
+- 資料驗證：檢查會話關聯和學習歷程完整性
 
-🔧 與 app.py v4.0 兼容性:
-- Student.get_or_none() 方法完全兼容
-- 註冊流程狀態追蹤
-- Message 來源類型規範化
-- 自動統計更新機制
+🔧 管理功能:
+- manage_conversation_sessions(): 自動會話管理
+- manage_learning_histories(): 學習歷程記錄管理
+- 增強的資料驗證和修復功能
+- 完整的演示資料清理支援
+
+🚀 記憶功能支援:
+- Message.get_conversation_context(): 取得對話上下文
+- Student.get_active_session(): 取得目前活躍會話
+- ConversationSession.get_messages(): 取得會話中的所有訊息
+
+📈 學習歷程支援:
+- LearningHistory.get_latest_for_student(): 取得最新學習歷程
+- 支援 JSON 格式儲存複雜的學習資料
+- 自動統計更新和清理機制
 
 版本日期: 2025年6月29日
-優化版本: v4.0
-設計理念: 穩定、兼容、功能完整
-兼容性: 與 app.py v4.0 和 utils.py v4.0 完美配合
+更新版本: v4.1 (記憶功能和學習歷程)
+設計理念: 向後相容、功能完整、智慧管理
+新增特色: 記憶功能、學習歷程、會話追蹤、智慧清理
 """
 
-# =================== models.py 優化版 - 完整版結束 ===================
+# =================== models.py 更新版 - 第4段結束 ===================
+# =================== 完整檔案結束 ===================
