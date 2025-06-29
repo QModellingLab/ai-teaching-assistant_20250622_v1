@@ -1,6 +1,6 @@
-# =================== models.py 簡化版 - 第1段開始 ===================
-# EMI智能教學助理系統 - 資料模型定義（簡化版）
-# 簡化統計邏輯，新增註冊流程欄位
+# =================== models.py 優化版 - 完整版開始 ===================
+# EMI智能教學助理系統 - 資料模型定義（與app.py v4.0兼容）
+# 支援優化的註冊流程，移除快取依賴
 # 更新日期：2025年6月29日
 
 import os
@@ -27,22 +27,22 @@ class BaseModel(Model):
     class Meta:
         database = db
 
-# =================== 學生模型（簡化版） ===================
+# =================== 學生模型（優化版，支援新註冊流程） ===================
 
 class Student(BaseModel):
-    """學生資料模型 - 簡化版本，專注核心功能"""
+    """學生資料模型 - 優化版本，與app.py v4.0完全兼容"""
     
     # 基本資料
     id = AutoField(primary_key=True)
     name = CharField(max_length=100, default='', verbose_name="姓名")
     line_user_id = CharField(max_length=100, unique=True, verbose_name="LINE用戶ID")
     
-    # ✨ 新增：學號欄位
+    # ✨ 學號欄位（支援新註冊流程）
     student_id = CharField(max_length=20, default='', verbose_name="學號")
     
-    # ✨ 新增：註冊流程追蹤
+    # ✨ 註冊流程追蹤（與app.py v4.0完全兼容）
     registration_step = IntegerField(default=0, verbose_name="註冊步驟")
-    # 0=已完成註冊, 1=等待姓名, 2=等待學號
+    # 0=已完成註冊, 1=等待學號, 2=等待姓名, 3=等待確認
     
     # 保留必要欄位（向後相容）
     grade = CharField(max_length=20, null=True, default=None, verbose_name="年級") 
@@ -55,27 +55,19 @@ class Student(BaseModel):
     last_active = DateTimeField(default=datetime.datetime.now, verbose_name="最後活動")
     is_active = BooleanField(default=True, verbose_name="是否活躍")
     
-    # ❌ 移除的複雜統計欄位（簡化）
-    # participation_rate = FloatField(default=0.0, verbose_name="參與度")
-    # question_count = IntegerField(default=0, verbose_name="提問次數") 
-    # question_rate = FloatField(default=0.0, verbose_name="提問率")
-    # active_days = IntegerField(default=0, verbose_name="活躍天數")
-    # learning_style = CharField(max_length=50, null=True, verbose_name="學習風格")
-    # language_preference = CharField(max_length=20, default='mixed', verbose_name="語言偏好")
-    # level = CharField(max_length=20, null=True, verbose_name="程度等級")
-    
     class Meta:
         table_name = 'students'
         indexes = (
             (('line_user_id',), True),  # 唯一索引
             (('created_at',), False),   # 一般索引
             (('last_active',), False),
+            (('registration_step',), False),  # 新增：註冊步驟索引
         )
     
     def __str__(self):
         return f"Student({self.name}, {self.student_id}, {self.line_user_id})"
     
-    # =================== 基本查詢方法 ===================
+    # =================== 基本查詢方法（優化版） ===================
     
     @classmethod
     def get_by_line_id(cls, line_user_id):
@@ -100,7 +92,7 @@ class Student(BaseModel):
     
     @classmethod
     def get_or_none(cls, *args, **kwargs):
-        """安全取得學生，不存在時回傳None"""
+        """安全取得學生，不存在時回傳None（與app.py兼容）"""
         try:
             return cls.get(*args, **kwargs)
         except cls.DoesNotExist:
@@ -111,10 +103,18 @@ class Student(BaseModel):
     
     @classmethod
     def create(cls, **data):
-        """創建學生（覆寫以添加日誌）"""
+        """創建學生（覆寫以添加日誌和預設值）"""
         try:
+            # 確保新學生有正確的預設值
+            if 'registration_step' not in data:
+                data['registration_step'] = 1  # 新學生從步驟1開始（等待學號）
+            if 'created_at' not in data:
+                data['created_at'] = datetime.datetime.now()
+            if 'last_active' not in data:
+                data['last_active'] = datetime.datetime.now()
+            
             student = super().create(**data)
-            logger.info(f"✅ 創建新學生: {student.name} (LINE ID: {student.line_user_id})")
+            logger.info(f"✅ 創建新學生: {student.name or '[待設定]'} (LINE ID: {student.line_user_id})")
             return student
         except Exception as e:
             logger.error(f"❌ 創建學生失敗: {e}")
@@ -141,7 +141,38 @@ class Student(BaseModel):
             logger.error(f"❌ get_or_create 失敗: {e}")
             raise
     
-    # =================== 簡化的實例方法 ===================
+    # =================== 註冊狀態管理（支援app.py新流程） ===================
+    
+    def is_registered(self):
+        """檢查是否已完成註冊（與app.py兼容）"""
+        return self.registration_step == 0 and self.name and self.student_id
+    
+    def needs_registration(self):
+        """檢查是否需要註冊（與app.py兼容）"""
+        return self.registration_step > 0 or not self.name or not self.student_id
+    
+    def get_registration_status(self):
+        """取得詳細註冊狀態"""
+        if self.registration_step == 0 and self.name and self.student_id:
+            return "已完成"
+        elif self.registration_step == 1:
+            return "等待學號"
+        elif self.registration_step == 2:
+            return "等待姓名"
+        elif self.registration_step == 3:
+            return "等待確認"
+        else:
+            return "需要重新註冊"
+    
+    def reset_registration(self):
+        """重設註冊狀態"""
+        self.registration_step = 1
+        self.name = ""
+        self.student_id = ""
+        self.save()
+        logger.info(f"重設學生 {self.line_user_id} 的註冊狀態")
+    
+    # =================== 活動和統計管理（簡化版） ===================
     
     def update_activity(self):
         """更新學生活動狀態"""
@@ -176,13 +207,19 @@ class Student(BaseModel):
         else:
             return f"{time_diff.days}天前"
     
-    def is_registered(self):
-        """檢查是否已完成註冊"""
-        return self.registration_step == 0 and self.name and self.student_id
+    def get_conversation_count(self):
+        """取得對話總數"""
+        try:
+            return Message.select().where(Message.student == self).count()
+        except Exception as e:
+            logger.error(f"❌ 取得對話數失敗: {e}")
+            return 0
     
-    def needs_registration(self):
-        """檢查是否需要註冊"""
-        return self.registration_step > 0 or not self.name or not self.student_id
+    def get_days_since_created(self):
+        """取得註冊天數"""
+        if not self.created_at:
+            return 0
+        return (datetime.datetime.now() - self.created_at).days
     
     # =================== 演示資料管理（保留） ===================
     
@@ -273,20 +310,17 @@ class Student(BaseModel):
                 'message': '清理演示學生時發生錯誤'
             }
 
-# =================== 訊息模型（簡化版） ===================
+# =================== 訊息模型（與app.py完全兼容） ===================
 
 class Message(BaseModel):
-    """訊息模型 - 簡化版本"""
+    """訊息模型 - 與app.py v4.0完全兼容"""
     
     id = AutoField(primary_key=True)
     student = ForeignKeyField(Student, backref='messages', verbose_name="學生")
     content = TextField(verbose_name="訊息內容")
     timestamp = DateTimeField(default=datetime.datetime.now, verbose_name="時間戳記")
-    source_type = CharField(max_length=20, default='line', verbose_name="來源類型")
-    # 'line' = 學生訊息, 'ai' = AI回應
-    
-    # ❌ 移除的複雜欄位（簡化）
-    # message_type = CharField(max_length=20, default='message', verbose_name="訊息類型")
+    source_type = CharField(max_length=20, default='student', verbose_name="來源類型")
+    # 支援的類型：'student', 'line', 'ai'
     
     class Meta:
         table_name = 'messages'
@@ -301,10 +335,25 @@ class Message(BaseModel):
     
     @classmethod
     def create(cls, **data):
-        """創建訊息（覆寫以添加日誌）"""
+        """創建訊息（覆寫以添加日誌和規範化來源類型）"""
         try:
+            # 規範化來源類型（與app.py兼容）
+            if 'source_type' in data:
+                source = data['source_type']
+                if source == 'line':
+                    data['source_type'] = 'student'  # 統一使用'student'
+            
             message = super().create(**data)
             logger.debug(f"創建訊息: {message.student.name} - {message.source_type}")
+            
+            # 自動更新學生的活動時間和訊息計數
+            try:
+                student = message.student
+                student.update_activity()
+                student.update_message_count()
+            except Exception as e:
+                logger.warning(f"更新學生統計失敗: {e}")
+            
             return message
         except Exception as e:
             logger.error(f"❌ 創建訊息失敗: {e}")
@@ -323,7 +372,7 @@ class Message(BaseModel):
     @property
     def is_student_message(self):
         """檢查是否為學生訊息"""
-        return self.source_type == 'line'
+        return self.source_type in ['line', 'student']
     
     @property
     def is_ai_message(self):
@@ -381,11 +430,6 @@ class Message(BaseModel):
                 'error': str(e),
                 'message': '清理演示訊息時發生錯誤'
             }
-
-# =================== models.py 簡化版 - 第1段結束 ===================
-
-# =================== models.py 簡化版 - 第2段開始 ===================
-# 分析模型和資料庫管理功能
 
 # =================== 分析模型（保留但簡化） ===================
 
@@ -481,7 +525,7 @@ def initialize_db():
             db.connect()
             logger.info("✅ 資料庫連接建立")
         
-        # 創建所有表格（簡化版）
+        # 創建所有表格
         db.create_tables([Student, Message, Analysis], safe=True)
         logger.info("✅ 資料庫表格初始化完成")
         
@@ -500,10 +544,10 @@ def close_db():
     except Exception as e:
         logger.error(f"❌ 關閉資料庫連接失敗: {e}")
 
-# =================== 資料庫遷移功能（簡化版） ===================
+# =================== 資料庫遷移功能（優化版） ===================
 
 def migrate_database():
-    """資料庫遷移 - 添加新欄位"""
+    """資料庫遷移 - 添加新欄位並支援新註冊流程"""
     try:
         logger.info("🔄 開始資料庫遷移...")
         
@@ -570,7 +614,7 @@ def migrate_database():
         return False
 
 def reset_registration_for_incomplete_students():
-    """重設不完整註冊的學生"""
+    """重設不完整註冊的學生（支援新註冊流程）"""
     try:
         # 找出姓名或學號為空的學生，設定為需要重新註冊
         incomplete_students = Student.update(registration_step=1).where(
@@ -587,10 +631,10 @@ def reset_registration_for_incomplete_students():
         logger.error(f"❌ 重設註冊狀態失敗: {e}")
         return 0
 
-# =================== 資料庫統計功能（簡化版） ===================
+# =================== 資料庫統計功能（優化版） ===================
 
 def get_database_stats():
-    """取得資料庫統計資訊（簡化版）"""
+    """取得資料庫統計資訊（優化版）"""
     try:
         stats = {
             'students': {
@@ -604,7 +648,7 @@ def get_database_stats():
                 'total': Message.select().count(),
                 'real': Message.get_real_messages().count(),
                 'demo': Message.get_demo_messages().count(),
-                'student_messages': Message.select().where(Message.source_type == 'line').count(),
+                'student_messages': Message.select().where(Message.source_type.in_(['line', 'student'])).count(),
                 'ai_messages': Message.select().where(Message.source_type == 'ai').count(),
             },
             'analyses': {
@@ -673,6 +717,121 @@ def cleanup_all_demo_data():
             'message': '清理演示資料時發生錯誤'
         }
 
+# =================== 資料驗證和修復功能（新增） ===================
+
+def validate_database_integrity():
+    """驗證資料庫完整性"""
+    try:
+        validation_report = {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'overall_status': 'healthy',
+            'issues': [],
+            'recommendations': [],
+            'stats': {}
+        }
+        
+        # 檢查學生資料
+        students = list(Student.select())
+        missing_name = sum(1 for s in students if not s.name)
+        missing_student_id = sum(1 for s in students if not getattr(s, 'student_id', ''))
+        incomplete_registration = sum(1 for s in students if s.registration_step > 0)
+        
+        validation_report['stats']['students'] = {
+            'total': len(students),
+            'missing_name': missing_name,
+            'missing_student_id': missing_student_id,
+            'incomplete_registration': incomplete_registration
+        }
+        
+        if missing_name > 0:
+            validation_report['issues'].append(f'{missing_name} 位學生缺少姓名')
+            validation_report['recommendations'].append('使用 reset_registration_for_incomplete_students() 重設註冊狀態')
+        
+        if missing_student_id > 0:
+            validation_report['issues'].append(f'{missing_student_id} 位學生缺少學號')
+        
+        if incomplete_registration > 0:
+            validation_report['issues'].append(f'{incomplete_registration} 位學生尚未完成註冊')
+        
+        # 檢查訊息資料
+        messages = Message.select().count()
+        orphaned_messages = Message.select().join(Student, join_type='LEFT OUTER').where(Student.id.is_null()).count()
+        
+        validation_report['stats']['messages'] = {
+            'total': messages,
+            'orphaned': orphaned_messages
+        }
+        
+        if orphaned_messages > 0:
+            validation_report['issues'].append(f'{orphaned_messages} 則訊息缺少對應學生')
+            validation_report['recommendations'].append('清理孤立的訊息記錄')
+        
+        # 決定整體狀態
+        if validation_report['issues']:
+            validation_report['overall_status'] = 'warning'
+        
+        if not validation_report['recommendations']:
+            validation_report['recommendations'].append('資料庫狀態良好')
+        
+        return validation_report
+        
+    except Exception as e:
+        logger.error(f"❌ 資料庫完整性檢查失敗: {e}")
+        return {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'overall_status': 'error',
+            'error': str(e)
+        }
+
+def fix_database_issues():
+    """修復常見的資料庫問題"""
+    try:
+        fix_report = {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'fixes_applied': [],
+            'errors': []
+        }
+        
+        # 修復1：清理孤立的訊息
+        try:
+            orphaned_count = Message.delete().join(Student, join_type='LEFT OUTER').where(Student.id.is_null()).execute()
+            if orphaned_count > 0:
+                fix_report['fixes_applied'].append(f'清理了 {orphaned_count} 則孤立訊息')
+        except Exception as e:
+            fix_report['errors'].append(f'清理孤立訊息失敗: {str(e)}')
+        
+        # 修復2：重設不完整的註冊
+        try:
+            reset_count = reset_registration_for_incomplete_students()
+            if reset_count > 0:
+                fix_report['fixes_applied'].append(f'重設了 {reset_count} 位學生的註冊狀態')
+        except Exception as e:
+            fix_report['errors'].append(f'重設註冊狀態失敗: {str(e)}')
+        
+        # 修復3：更新訊息計數
+        try:
+            students = Student.select()
+            updated_count = 0
+            for student in students:
+                old_count = student.message_count
+                student.update_message_count()
+                if student.message_count != old_count:
+                    updated_count += 1
+            
+            if updated_count > 0:
+                fix_report['fixes_applied'].append(f'更新了 {updated_count} 位學生的訊息計數')
+        except Exception as e:
+            fix_report['errors'].append(f'更新訊息計數失敗: {str(e)}')
+        
+        return fix_report
+        
+    except Exception as e:
+        logger.error(f"❌ 資料庫修復失敗: {e}")
+        return {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'error': str(e)
+        }
+
 # =================== 相容性和初始化 ===================
 
 # 保持向後相容性的別名
@@ -709,47 +868,58 @@ __all__ = [
     'migrate_database', 'reset_registration_for_incomplete_students',
     
     # 統計和清理函數
-    'get_database_stats', 'cleanup_all_demo_data'
+    'get_database_stats', 'cleanup_all_demo_data',
+    
+    # 驗證和修復函數（新增）
+    'validate_database_integrity', 'fix_database_issues'
 ]
 
 # =================== 版本說明 ===================
 
 """
-EMI 智能教學助理系統 - models.py 簡化版
+EMI 智能教學助理系統 - models.py 優化版
 =====================================
 
-🎯 簡化重點:
-- ✨ 新增學號欄位 (student_id)
-- ✨ 新增註冊流程追蹤 (registration_step)  
-- ❌ 移除複雜統計欄位（參與度、提問率等）
-- 🔧 簡化方法，專注核心功能
-- 💾 保留向後相容性
+🎯 優化重點:
+- ✨ 完全支援 app.py v4.0 的新註冊流程
+- ✨ 新增註冊狀態管理方法
+- ✨ 新增資料驗證和修復功能
+- ❌ 移除快取依賴，簡化統計邏輯
+- 🔧 增強錯誤處理和日誌記錄
 
 ✨ 新增功能:
-- 註冊流程追蹤：0=已完成, 1=等待姓名, 2=等待學號
-- 學號欄位：儲存學生的學號資訊
-- 簡化統計：只保留必要的基本統計
-- 自動遷移：升級現有資料庫結構
+- 註冊流程追蹤：0=完成, 1=等待學號, 2=等待姓名, 3=等待確認
+- 學號欄位：完整支援學號儲存和驗證
+- 註冊狀態管理：is_registered(), needs_registration(), get_registration_status()
+- 資料完整性檢查：validate_database_integrity(), fix_database_issues()
+- 自動統計更新：訊息計數和活動時間自動維護
 
 🗂️ 資料模型:
-- Student: 學生基本資料 + 註冊狀態
-- Message: 對話記錄（學生/AI訊息）
+- Student: 學生基本資料 + 完整註冊狀態支援
+- Message: 對話記錄（支援'student', 'line', 'ai'來源類型）
 - Analysis: 分析記錄（保留但簡化）
 
 🔄 資料庫遷移:
-- 自動添加新欄位
-- 保持現有資料完整
-- 向後相容舊版本
+- 自動添加所需新欄位
+- 保持現有資料完整性
+- 完整向後相容性
 
 📊 統計功能:
 - 基本計數統計
+- 註冊狀態統計
 - 演示資料管理
-- 清理功能
+- 資料清理和修復
+
+🔧 與 app.py v4.0 兼容性:
+- Student.get_or_none() 方法完全兼容
+- 註冊流程狀態追蹤
+- Message 來源類型規範化
+- 自動統計更新機制
 
 版本日期: 2025年6月29日
-簡化版本: v3.0
-設計理念: 簡潔、實用、易維護
+優化版本: v4.0
+設計理念: 穩定、兼容、功能完整
+兼容性: 與 app.py v4.0 和 utils.py v4.0 完美配合
 """
 
-# =================== models.py 簡化版 - 第2段結束 ===================
-# =================== 程式檔案結束 ===================
+# =================== models.py 優化版 - 完整版結束 ===================
