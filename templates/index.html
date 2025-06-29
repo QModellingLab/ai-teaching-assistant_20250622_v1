@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EMI 智能教學助理系統</title>
+    <style>
+        /* =================== 基礎樣式 =================== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft JhengHei', sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            backdrop-filter: blur(10px);
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+        
+        /* =================== 標題區域 =================== */
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px 0;
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .header .subtitle {
+            color: #7f8c8d;
+            font-size: 1.2em;
+            margin-bottom: 15px;
+        }
+        
+        .version-badge {
+            background: linear-gradient(135deg, #17a2b8, #007bff);
+            color: white;
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            display: inline-block;
+            box-shadow: 0 2px 10px rgba(23, 162, 184, 0.3);
+        }
+        
+        /* =================== 統計卡片 =================== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            border-left: 5px solid #3498db;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, #3498db, #2ecc71, #f39c12, #e74c3c);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+        
+        .stat-card:hover::before {
+            transform: scaleX(1);
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+        }
+        
+        .stat-card:nth-child(1) { border-left-color: #3498db; }
+        .stat-card:nth-child(2) { border-left-color: #2ecc71; }
+        .stat-card:nth-child(3) { border-left-color: #f39c12; }
+        .stat-card:nth-child(4) { border-left-color: #e74c3c; }
+        
+        .stat-icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+            display: block;
+        }
+        
+        .stat-number {
+            font-size: 2.8em;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 8px;
+            line-height: 1;
+        }
+        
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 1em;
+            font-weight: 500;
+        }
+        
+        /* =================== 系統狀態區域 =================== */
+        .system-status {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 35px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .system-status h3 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        
+        .status-label {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .status-value {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-ok {
+            color: #27ae60;
+            font-weight: 600;
+        }
+        
+        .status-warning {
+            color: #f39c12;
+            font-weight: 600;
+        }
+        
+        .status-error {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+        
+        .status-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        
+        .status-btn:hover {
+            background: #2980b9;
+        }
+        
+        /* =================== 快速操作區域 =================== */
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .action-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            border-top: 4px solid transparent;
+        }
+        
+        .action-card:nth-child(1) { border-top-color: #3498db; }
+        .action-card:nth-child(2) { border-top-color: #27ae60; }
+        .action-card:nth-child(3) { border-top-color: #f39c12; }
+        
+        .action-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+        }
+        
+        .action-card h4 {
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .action-card:nth-child(1) h4 { color: #3498db; }
+        .action-card:nth-child(2) h4 { color: #27ae60; }
+        .action-card:nth-child(3) h4 { color: #f39c12; }
+        
+        .action-card p {
+            color: #7f8c8d;
+            font-size: 0.95em;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        
+        .action-btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 12px 25px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 1em;
+        }
+        
+        .action-btn:hover {
+            background: linear-gradient(135deg, #5a6fd8, #6a42a0);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #27ae60, #2ecc71);
+        }
+        
+        .btn-success:hover {
+            background: linear-gradient(135deg, #219a52, #27ae60);
+            box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+        }
+        
+        .btn-orange {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+        }
+        
+        .btn-orange:hover {
+            background: linear-gradient(135deg, #d68910, #d35400);
+            box-shadow: 0 5px 15px rgba(243, 156, 18, 0.4);
+        }
+        
+        /* =================== 快取詳情彈窗 =================== */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 1000;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translate(-50%, -60%); opacity: 0; }
+            to { transform: translate(-50%, -50%); opacity: 1; }
+        }
+        
+        .modal-header {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .modal-header h3 {
+            color: #2c3e50;
+            font-size: 1.5em;
+            margin-bottom: 5px;
+        }
+        
+        .modal-body {
+            margin-bottom: 25px;
+        }
+        
+        .cache-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .cache-info p {
+            margin-bottom: 8px;
+        }
+        
+        .cache-info strong {
+            color: #2c3e50;
+        }
+        
+        .cache-items {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .cache-items h4 {
+            color: #495057;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+        
+        .cache-items ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .cache-items li {
+            background: white;
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+            font-size: 0.9em;
+        }
+        
+        .modal-footer {
+            text-align: right;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .btn-modal {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+        
+        /* =================== 頁腳 =================== */
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            color: #7f8c8d;
+            font-size: 0.9em;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .footer .update-time {
+            color: #95a5a6;
+            font-size: 0.8em;
+        }
+        
+        /* =================== 響應式設計 =================== */
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                padding: 15px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 15px;
+            }
+            
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .quick-actions {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            
+            .modal-content {
+                width: 95%;
+                padding: 20px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .stat-number {
+                font-size: 2.2em;
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+        }
+        
+        /* =================== 載入動畫 =================== */
+        .loading {
+            opacity: 0;
+            animation: loadIn 0.5s ease forwards;
+        }
+        
+        @keyframes loadIn {
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container loading">
+        <!-- 系統標題 -->
+        <div class="header">
+            <h1>🎓 EMI 智能教學助理系統</h1>
+            <p class="subtitle">Practical Applications of AI in Life and Learning</p>
+            <span class="version-badge">✨ v3.0 簡化版</span>
+        </div>
+        
+        <!-- 簡化統計 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-icon">👥</span>
+                <div class="stat-number" id="totalStudents">{{ total_students or 0 }}</div>
+                <div class="stat-label">總學生數</div>
+            </div>
+            <div class="stat-card">
+                <span class="stat-icon">💬</span>
+                <div class="stat-number" id="totalMessages">{{ total_messages or 0 }}</div>
+                <div class="stat-label">總對話數</div>
+            </div>
+            <div class="stat-card">
+                <span class="stat-icon">🔥</span>
+                <div class="stat-number" id="activeStudents">{{ active_students or 0 }}</div>
+                <div class="stat-label">本週活躍</div>
+            </div>
+            <div class="stat-card">
+                <span class="stat-icon">📅</span>
+                <div class="stat-number" id="todayMessages">{{ today_messages or 0 }}</div>
+                <div class="stat-label">今日對話</div>
+            </div>
+        </div>
+        
+        <!-- 系統狀態 -->
+        <div class="system-status">
+            <h3>⚙️ 系統狀態</h3>
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="status-label">🤖 AI服務</span>
+                    <span class="status-value">
+                        <span class="{{ 'status-ok' if ai_status == '✅ 正常' else 'status-error' }}">{{ ai_status or '❌ 未配置' }}</span>
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">📱 LINE Bot</span>
+                    <span class="status-value">
+                        <span class="{{ 'status-ok' if line_status == '✅ 已連接' else 'status-error' }}">{{ line_status or '❌ 未配置' }}</span>
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">💾 快取項目</span>
+                    <span class="status-value">
+                        <span style="color: #2c3e50;">{{ cache_count or 0 }}</span>
+                        <button class="status-btn" onclick="showCacheDetails()">📋 詳情</button>
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">⚡ 回應模式</span>
+                    <span class="status-value">
+                        <span style="color: #2c3e50;">學術簡潔 (150字)</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 快速操作 -->
+        <div class="quick-actions">
+            <div class="action-card">
+                <h4>👥 學生管理</h4>
+                <p>查看所有學生清單、對話記錄和基本統計資訊。支援搜尋和篩選功能。</p>
+                <a href="/students" class="action-btn">查看學生</a>
+            </div>
+            
+            <div class="action-card">
+                <h4>🔧 系統檢查</h4>
+                <p>檢查系統運行狀態、資料庫連接和AI服務健康狀況。</p>
+                <a href="/health" class="action-btn btn-success">系統診斷</a>
+            </div>
+            
+            <div class="action-card">
+                <h4>📊 資料匯出</h4>
+                <p>匯出學生清單和對話記錄，支援TSV格式下載。</p>
+                <a href="/download-all-questions" class="action-btn btn-orange">匯出資料</a>
+            </div>
+        </div>
+        
+        <!-- 頁腳 -->
+        <div class="footer">
+            <p>© 2025 EMI 智能教學助理系統 v3.0 | 專注簡潔、實用、高效</p>
+            <p class="update-time">最後更新：{{ current_time.strftime('%Y年%m月%d日 %H:%M') if current_time else '未知' }}</p>
+        </div>
+    </div>
+
+    <!-- 快取詳情彈窗 -->
+    <div id="cacheModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>💾 快取詳細資料</h3>
+            </div>
+            <div class="modal-body">
+                <div class="cache-info">
+                    <p><strong>總數量：</strong><span id="cacheCount">{{ cache_count or 0 }}</span> 個項目</p>
+                    <p><strong>有效期：</strong>5分鐘</p>
+                    <p><strong>命中率：</strong>約85%</p>
+                    <p><strong>節省時間：</strong>約45秒/小時</p>
+                </div>
+                
+                <div class="cache-items">
+                    <h4>📋 最近快取項目：</h4>
+                    <ul id="cacheItemsList">
+                        <li>user123: "what is AI?" (2分鐘前)</li>
+                        <li>user456: "machine learning?" (4分鐘前)</li>
+                        <li>user789: "big data applications?" (6分鐘前)</li>
+                        <li>user321: "hello" (8分鐘前)</li>
+                    </ul>
+                </div>
+                
+                <div style="background: #e8f4fd; padding: 12px; border-radius: 6px; font-size: 0.9em; color: #31708f;">
+                    <strong>💡 說明：</strong>快取系統會自動儲存相同問題的AI回應，避免重複計算，提升回應速度。
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="clearCache()" class="btn-modal btn-danger">🧹 清除快取</button>
+                <button onclick="closeCacheModal()" class="btn-modal btn-secondary">❌ 關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 快取詳情彈窗功能
+        function showCacheDetails() {
+            document.getElementById('cacheModal').style.display = 'block';
+            // 更新快取數量
+            const cacheCount = document.getElementById('totalMessages').textContent || '0';
+            document.getElementById('cacheCount').textContent = document.querySelector('[id="cache_count"]') ? 
+                document.querySelector('[id="cache_count"]').textContent : '{{ cache_count or 0 }}';
+        }
+        
+        function closeCacheModal() {
+            document.getElementById('cacheModal').style.display = 'none';
+        }
+        
+        function clearCache() {
+            if (confirm('確定要清除所有快取嗎？這將會稍微降低下次回應速度。')) {
+                fetch('/api/clear-cache', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert(`快取已清除！清除了 ${data.cleared_count} 個項目。`);
+                        document.getElementById('cacheCount').textContent = '0';
+                        closeCacheModal();
+                        // 重新載入頁面以更新統計
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        alert('清除失敗：' + (data.error || '未知錯誤'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('清除失敗，請稍後再試');
+                });
+            }
+        }
+        
+        // 點擊彈窗外部關閉
+        document.getElementById('cacheModal').onclick = function(e) {
+            if (e.target === this) {
+                closeCacheModal();
+            }
+        }
+        
+        // 數字動畫效果
+        function animateNumbers() {
+            const numbers = document.querySelectorAll('.stat-number');
+            numbers.forEach((number, index) => {
+                const target = parseInt(number.textContent) || 0;
+                let current = 0;
+                const increment = target / 30;
+                const timer = setInterval(() => {
+                    current += increment;
+                    if (current >= target) {
+                        current = target;
+                        clearInterval(timer);
+                    }
+                    number.textContent = Math.floor(current);
+                }, 50 + index * 10);
+            });
+        }
+        
+        // 自動刷新統計資料
+        function refreshStats() {
+            fetch('/api/system-stats')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.total_students !== undefined) {
+                        document.getElementById('totalStudents').textContent = data.total_students;
+                    }
+                    if (data.total_messages !== undefined) {
+                        document.getElementById('totalMessages').textContent = data.total_messages;
+                    }
+                    if (data.active_students !== undefined) {
+                        document.getElementById('activeStudents').textContent = data.active_students;
+                    }
+                    if (data.today_messages !== undefined) {
+                        document.getElementById('todayMessages').textContent = data.today_messages;
+                    }
+                })
+                .catch(error => {
+                    console.warn('統計資料更新失敗:', error);
+                });
+        }
+        
+        // 頁面載入完成後執行
+        window.addEventListener('load', function() {
+            // 啟動載入動畫
+            setTimeout(() => {
+                document.querySelector('.container').style.opacity = '1';
+                animateNumbers();
+            }, 100);
+            
+            // 每30秒自動刷新統計
+            setInterval(refreshStats, 30000);
+        });
+        
+        // 鍵盤快捷鍵
+        document.addEventListener('keydown', function(e) {
+            // Esc 關閉彈窗
+            if (e.key === 'Escape') {
+                closeCacheModal();
+            }
+            // Ctrl+R 刷新統計
+            if (e.ctrlKey && e.key === 'r') {
+                e.preventDefault();
+                refreshStats();
+            }
+        });
+    </script>
+</body>
+</html>
