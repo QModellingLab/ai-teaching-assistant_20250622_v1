@@ -1,8 +1,8 @@
-# =================== EMI 智能教學助理 - 精簡修復版 app.py ===================
+# =================== EMI 智能教學助理 - Railway 修復版 app.py ===================
 # 🔸 第 1 段：基本配置和核心功能（第 1-750 行）
-# 版本: 4.2.0 - 保留記憶功能，修復語法錯誤
+# 版本: 4.2.1 - Railway 部署修復版
 # 日期: 2025年6月29日
-# 特色: 保留記憶功能 + 簡化學習歷程 + 修復巢狀 f-string
+# 特色: 保留記憶功能 + 強制資料庫初始化 + 修復語法錯誤
 
 import os
 import json
@@ -37,61 +37,22 @@ PORT = int(os.getenv('PORT', 8080))
 HOST = os.getenv('HOST', '0.0.0.0')
 DEBUG_MODE = os.getenv('FLASK_ENV') == 'development'
 
+# 記錄環境變數狀態
+logger.info("🔍 檢查環境變數...")
+for var_name, var_value in [
+    ('CHANNEL_ACCESS_TOKEN', CHANNEL_ACCESS_TOKEN),
+    ('CHANNEL_SECRET', CHANNEL_SECRET), 
+    ('GEMINI_API_KEY', GEMINI_API_KEY),
+    ('DATABASE_URL', os.getenv('DATABASE_URL'))
+]:
+    if var_value:
+        logger.info(f"✅ {var_name}: 已設定")
+    else:
+        logger.warning(f"⚠️ {var_name}: 未設定")
+
 # =================== 應用程式初始化 ===================
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-
-# LINE Bot API 初始化
-line_bot_api = None
-handler = None
-
-if CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET:
-    try:
-        line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
-        handler = WebhookHandler(CHANNEL_SECRET)
-        logger.info("✅ LINE Bot 服務已成功初始化")
-    except Exception as e:
-        logger.error(f"❌ LINE Bot 初始化失敗: {e}")
-else:
-    logger.error("❌ LINE Bot 初始化失敗：缺少必要的環境變數")
-
-# Gemini AI 初始化
-model = None
-CURRENT_MODEL = None
-
-if GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        
-        # 按優先順序嘗試模型
-        models_priority = [
-            'gemini-2.5-flash',
-            'gemini-2.0-flash-exp', 
-            'gemini-1.5-flash',
-            'gemini-1.5-pro',
-            'gemini-pro'
-        ]
-        
-        for model_name in models_priority:
-            try:
-                test_model = genai.GenerativeModel(model_name)
-                test_response = test_model.generate_content("Test")
-                if test_response and test_response.text:
-                    model = test_model
-                    CURRENT_MODEL = model_name
-                    logger.info(f"✅ Gemini AI 已成功配置，使用模型: {model_name}")
-                    break
-            except Exception as e:
-                logger.warning(f"⚠️ 模型 {model_name} 無法使用: {e}")
-                continue
-        
-        if not model:
-            logger.error("❌ 所有 Gemini 模型都無法使用")
-            
-    except Exception as e:
-        logger.error(f"❌ Gemini AI 配置失敗: {e}")
-else:
-    logger.error("❌ Gemini AI 初始化失敗：缺少 GEMINI_API_KEY")
 
 # =================== 簡化資料庫模型（保留記憶功能）===================
 from peewee import *
@@ -137,6 +98,18 @@ class Student(BaseModel):
             session_start=datetime.datetime.now(),
             message_count=0
         )
+    
+    @classmethod
+    def get_by_id(cls, student_id):
+        """修復版的 get_by_id 方法"""
+        try:
+            return cls.select().where(cls.id == student_id).get()
+        except cls.DoesNotExist:
+            logger.warning(f"找不到 ID: {student_id} 的學生")
+            return None
+        except Exception as e:
+            logger.error(f"❌ 取得學生失敗: {e}")
+            return None
 
 class ConversationSession(BaseModel):
     """對話會話（保留記憶功能）"""
@@ -224,15 +197,58 @@ class Message(BaseModel):
             logger.error(f"取得對話上下文錯誤: {e}")
             return {'conversation_flow': [], 'recent_topics': [], 'message_count': 0}
 
+# =================== 🔧 RAILWAY 修復：強制資料庫初始化 ===================
+DATABASE_INITIALIZED = False
+
+try:
+    logger.info("🔄 Railway 部署 - 強制執行資料庫初始化...")
+    
+    # 連接並初始化資料庫
+    if db.is_closed():
+        db.connect()
+    
+    # 強制創建表格
+    db.create_tables([Student, ConversationSession, Message], safe=True)
+    logger.info("✅ Railway 資料庫初始化成功")
+    
+    # 檢查表格是否存在的函數
+    def check_table_exists(model_class):
+        try:
+            model_class.select().count()
+            return True
+        except Exception:
+            return False
+    
+    # 驗證所有表格
+    tables_status = {
+        'students': check_table_exists(Student),
+        'sessions': check_table_exists(ConversationSession),
+        'messages': check_table_exists(Message)
+    }
+    
+    if all(tables_status.values()):
+        logger.info("✅ 所有資料表已確認存在")
+        DATABASE_INITIALIZED = True
+    else:
+        logger.error(f"❌ 部分資料表創建失敗: {tables_status}")
+        DATABASE_INITIALIZED = False
+        
+except Exception as init_error:
+    logger.error(f"❌ Railway 資料庫初始化失敗: {init_error}")
+    DATABASE_INITIALIZED = False
+
 # =================== 資料庫管理函數 ===================
 def initialize_database():
     """初始化資料庫"""
     try:
-        db.connect()
+        if db.is_closed():
+            db.connect()
         db.create_tables([Student, ConversationSession, Message], safe=True)
         logger.info("✅ 資料庫初始化完成")
+        return True
     except Exception as e:
         logger.error(f"❌ 資料庫初始化失敗: {e}")
+        return False
 
 def manage_conversation_sessions():
     """清理舊會話"""
@@ -259,6 +275,68 @@ def manage_conversation_sessions():
     except Exception as e:
         logger.error(f"會話清理錯誤: {e}")
         return {'cleaned_sessions': 0, 'status': 'error', 'error': str(e)}
+
+def check_database_ready():
+    """檢查資料庫是否就緒"""
+    try:
+        # 嘗試執行簡單查詢
+        Student.select().count()
+        return True
+    except Exception as e:
+        logger.error(f"資料庫未就緒: {e}")
+        return False
+
+# =================== LINE Bot API 初始化 ===================
+line_bot_api = None
+handler = None
+
+if CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET:
+    try:
+        line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+        handler = WebhookHandler(CHANNEL_SECRET)
+        logger.info("✅ LINE Bot 服務已成功初始化")
+    except Exception as e:
+        logger.error(f"❌ LINE Bot 初始化失敗: {e}")
+else:
+    logger.error("❌ LINE Bot 初始化失敗：缺少必要的環境變數")
+
+# Gemini AI 初始化
+model = None
+CURRENT_MODEL = None
+
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        
+        # 按優先順序嘗試模型
+        models_priority = [
+            'gemini-2.5-flash',
+            'gemini-2.0-flash-exp', 
+            'gemini-1.5-flash',
+            'gemini-1.5-pro',
+            'gemini-pro'
+        ]
+        
+        for model_name in models_priority:
+            try:
+                test_model = genai.GenerativeModel(model_name)
+                test_response = test_model.generate_content("Test")
+                if test_response and test_response.text:
+                    model = test_model
+                    CURRENT_MODEL = model_name
+                    logger.info(f"✅ Gemini AI 已成功配置，使用模型: {model_name}")
+                    break
+            except Exception as e:
+                logger.warning(f"⚠️ 模型 {model_name} 無法使用: {e}")
+                continue
+        
+        if not model:
+            logger.error("❌ 所有 Gemini 模型都無法使用")
+            
+    except Exception as e:
+        logger.error(f"❌ Gemini AI 配置失敗: {e}")
+else:
+    logger.error("❌ Gemini AI 初始化失敗：缺少 GEMINI_API_KEY")
 
 # =================== AI 回應生成（保留記憶功能）===================
 def generate_ai_response_with_context(message_text, student):
@@ -465,6 +543,313 @@ Reply with **"YES"** to confirm ✅ or **"NO"** to restart ❌"""
     
     return None
 
+def extract_topic_tags(message_content):
+    """提取訊息的主題標籤"""
+    tags = []
+    content_lower = message_content.lower()
+    
+    topic_keywords = {
+        'ai': ['ai', 'artificial intelligence', 'machine learning', 'deep learning'],
+        'programming': ['python', 'code', 'programming', 'algorithm', 'coding'],
+        'english': ['grammar', 'vocabulary', 'pronunciation', 'writing'],
+        'business': ['business', 'management', 'marketing', 'strategy'],
+        'science': ['physics', 'chemistry', 'biology', 'mathematics', 'science']
+    }
+    
+    for topic, keywords in topic_keywords.items():
+        if any(keyword in content_lower for keyword in keywords):
+            tags.append(topic)
+    
+    return ','.join(tags) if tags else ''
+
+# =================== 第1段結束標記 ===================
+# 🔸 第1段結束 - 包含：基本配置、資料庫模型、強制初始化、AI服務、註冊處理
+# 🔸 下一段將包含：LINE Bot 處理、路由、學生管理頁面
+
+# =================== EMI 智能教學助理 - Railway 修復版 app.py ===================
+# 🔸 第 2 段：LINE Bot 處理和路由管理（第 751-1500 行）
+# 接續第1段，包含：LINE Bot處理、緊急修復路由、系統首頁、學生管理
+
+# =================== 🔧 RAILWAY 修復：緊急資料庫設置路由 ===================
+@app.route('/setup-database-force')
+def setup_database_force():
+    """緊急資料庫設置（Railway 修復專用）"""
+    global DATABASE_INITIALIZED
+    
+    try:
+        logger.info("🚨 執行緊急資料庫設置...")
+        
+        # 強制重新連接
+        if not db.is_closed():
+            db.close()
+        db.connect()
+        
+        # 強制創建表格
+        db.create_tables([Student, ConversationSession, Message], safe=True)
+        
+        # 驗證表格存在
+        def check_table_exists(model_class):
+            try:
+                model_class.select().count()
+                return True
+            except Exception:
+                return False
+        
+        tables_status = {
+            'students': check_table_exists(Student),
+            'messages': check_table_exists(Message), 
+            'sessions': check_table_exists(ConversationSession)
+        }
+        
+        # 基本統計
+        try:
+            student_count = Student.select().count()
+            message_count = Message.select().count()
+            session_count = ConversationSession.select().count()
+        except Exception as e:
+            student_count = f"錯誤: {e}"
+            message_count = f"錯誤: {e}"
+            session_count = f"錯誤: {e}"
+        
+        # 更新全域標記
+        if all(tables_status.values()):
+            DATABASE_INITIALIZED = True
+        
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔧 緊急資料庫修復</title>
+    <style>
+        body {{ font-family: sans-serif; margin: 20px; background: #f8f9fa; }}
+        .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+        .success {{ background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 5px; margin: 10px 0; }}
+        .error {{ background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 5px; margin: 10px 0; }}
+        .info {{ background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 15px; border-radius: 5px; margin: 10px 0; }}
+        .btn {{ display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Railway 緊急資料庫修復結果</h1>
+        
+        <h3>📊 表格狀態檢查:</h3>
+        <div class="{'success' if tables_status['students'] else 'error'}">
+            Students 表格: {'✅ 存在' if tables_status['students'] else '❌ 不存在'}
+        </div>
+        <div class="{'success' if tables_status['messages'] else 'error'}">
+            Messages 表格: {'✅ 存在' if tables_status['messages'] else '❌ 不存在'}
+        </div>
+        <div class="{'success' if tables_status['sessions'] else 'error'}">
+            Sessions 表格: {'✅ 存在' if tables_status['sessions'] else '❌ 不存在'}
+        </div>
+        
+        <h3>📈 資料統計:</h3>
+        <div class="info">
+            <strong>學生數量:</strong> {student_count}<br>
+            <strong>訊息數量:</strong> {message_count}<br>
+            <strong>會話數量:</strong> {session_count}
+        </div>
+        
+        <h3>🎯 修復狀態:</h3>
+        <div class="{'success' if all(tables_status.values()) else 'error'}">
+            {'''✅ 資料庫修復成功！現在可以正常使用系統了。''' if all(tables_status.values()) else '''❌ 部分表格仍有問題，請檢查 Railway 資料庫配置。'''}
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/" class="btn">🏠 返回首頁</a>
+            <a href="/health" class="btn">🔍 健康檢查</a>
+            <a href="/students" class="btn">👥 學生管理</a>
+        </div>
+    </div>
+</body>
+</html>
+        """
+        
+    except Exception as e:
+        logger.error(f"❌ 緊急資料庫設置失敗: {e}")
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>🚨 資料庫修復失敗</title>
+    <style>
+        body {{ font-family: sans-serif; margin: 20px; background: #f8f9fa; }}
+        .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+        .error {{ background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 5px; }}
+        .btn {{ display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚨 資料庫修復失敗</h1>
+        <div class="error">
+            <strong>錯誤詳情:</strong><br>
+            {str(e)}
+        </div>
+        
+        <h3>📋 建議解決方案:</h3>
+        <ol>
+            <li>檢查 Railway 中的 DATABASE_URL 環境變數</li>
+            <li>確認 PostgreSQL 服務正在運行</li>
+            <li>檢查資料庫連線權限</li>
+            <li>聯繫技術支援</li>
+        </ol>
+        
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/setup-database-force" class="btn">🔄 重試修復</a>
+            <a href="/" class="btn">🏠 返回首頁</a>
+        </div>
+    </div>
+</body>
+</html>
+        """
+
+@app.route('/database-status')
+def database_status():
+    """資料庫狀態檢查頁面"""
+    db_ready = check_database_ready()
+    
+    if not db_ready:
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚠️ 資料庫初始化中</title>
+    <style>
+        body {{ 
+            font-family: sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0; 
+            padding: 0; 
+            min-height: 100vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+        }}
+        .status-card {{ 
+            background: white; 
+            padding: 40px; 
+            border-radius: 15px; 
+            text-align: center; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2); 
+            max-width: 500px; 
+        }}
+        .spinner {{ 
+            border: 4px solid #f3f3f3; 
+            border-top: 4px solid #3498db; 
+            border-radius: 50%; 
+            width: 40px; 
+            height: 40px; 
+            animation: spin 2s linear infinite; 
+            margin: 20px auto; 
+        }}
+        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+        .btn {{ 
+            display: inline-block; 
+            padding: 12px 24px; 
+            background: #e74c3c; 
+            color: white; 
+            text-decoration: none; 
+            border-radius: 5px; 
+            font-weight: bold; 
+            margin: 10px; 
+        }}
+    </style>
+    <script>
+        setTimeout(function() {{
+            window.location.reload();
+        }}, 10000);
+    </script>
+</head>
+<body>
+    <div class="status-card">
+        <h1>⚠️ 資料庫初始化中</h1>
+        <div class="spinner"></div>
+        <p>系統正在初始化資料庫，請稍候...</p>
+        <p style="color: #666; font-size: 0.9em;">
+            如果此頁面持續顯示超過1分鐘，<br>
+            請點擊下方按鈕進行手動修復
+        </p>
+        
+        <div>
+            <a href="/setup-database-force" class="btn">🔧 手動修復資料庫</a>
+            <a href="/" class="btn" style="background: #3498db;">🔄 重新檢查</a>
+        </div>
+        
+        <p style="margin-top: 30px; font-size: 0.8em; color: #999;">
+            頁面將在10秒後自動重新載入
+        </p>
+    </div>
+</body>
+</html>
+        """
+    else:
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>✅ 資料庫就緒</title>
+    <style>
+        body {{ 
+            font-family: sans-serif; 
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            margin: 0; 
+            padding: 0; 
+            min-height: 100vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+        }}
+        .status-card {{ 
+            background: white; 
+            padding: 40px; 
+            border-radius: 15px; 
+            text-align: center; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2); 
+        }}
+        .btn {{ 
+            display: inline-block; 
+            padding: 12px 24px; 
+            background: #3498db; 
+            color: white; 
+            text-decoration: none; 
+            border-radius: 5px; 
+            font-weight: bold; 
+            margin: 10px; 
+        }}
+    </style>
+    <script>
+        setTimeout(function() {{
+            window.location.href = '/';
+        }}, 3000);
+    </script>
+</head>
+<body>
+    <div class="status-card">
+        <h1>✅ 資料庫就緒</h1>
+        <p>✨ 資料庫初始化完成！</p>
+        <p style="color: #666;">正在跳轉到首頁...</p>
+        
+        <div>
+            <a href="/" class="btn">🏠 立即前往首頁</a>
+        </div>
+        
+        <p style="margin-top: 20px; font-size: 0.8em; color: #999;">
+            3秒後自動跳轉
+        </p>
+    </div>
+</body>
+</html>
+        """
+
 # =================== LINE Bot Webhook 處理 ===================
 @app.route('/callback', methods=['POST'])
 def callback():
@@ -491,6 +876,14 @@ def callback():
 def handle_message(event):
     """處理 LINE 文字訊息（含記憶功能）"""
     try:
+        # 檢查資料庫是否就緒
+        if not DATABASE_INITIALIZED or not check_database_ready():
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="系統正在初始化，請稍後再試。")
+            )
+            return
+        
         user_id = event.source.user_id
         message_text = event.message.text.strip()
         
@@ -561,32 +954,6 @@ def handle_message(event):
             )
         except:
             logger.error("❌ 發送錯誤訊息也失敗了")
-
-def extract_topic_tags(message_content):
-    """提取訊息的主題標籤"""
-    tags = []
-    content_lower = message_content.lower()
-    
-    topic_keywords = {
-        'ai': ['ai', 'artificial intelligence', 'machine learning', 'deep learning'],
-        'programming': ['python', 'code', 'programming', 'algorithm', 'coding'],
-        'english': ['grammar', 'vocabulary', 'pronunciation', 'writing'],
-        'business': ['business', 'management', 'marketing', 'strategy'],
-        'science': ['physics', 'chemistry', 'biology', 'mathematics', 'science']
-    }
-    
-    for topic, keywords in topic_keywords.items():
-        if any(keyword in content_lower for keyword in keywords):
-            tags.append(topic)
-    
-    return ','.join(tags) if tags else ''
-
-# =================== 第1段結束標記 ===================
-# 🔸 第1段結束 - 下一段：簡化學習歷程生成和路由處理
-
-# =================== EMI 智能教學助理 - 精簡修復版 app.py ===================
-# 🔸 第 2 段：簡化學習歷程和路由處理（第 751-1500 行）
-# 接續第1段，包含：簡化學習歷程生成、路由處理、學生管理頁面
 
 # =================== 簡化學習歷程生成 ===================
 def generate_simple_learning_summary(student):
@@ -670,11 +1037,19 @@ Keep it under 200 words."""
         logger.error(f"學習摘要生成錯誤: {e}")
         return f"學習摘要生成時發生錯誤: {str(e)}"
 
-# =================== 路由處理 ===================
+# =================== 路由處理（含資料庫檢查）===================
 @app.route('/')
 def index():
-    """系統首頁（簡化版）"""
+    """系統首頁（含資料庫狀態檢查）"""
     try:
+        # 檢查資料庫是否就緒
+        if not DATABASE_INITIALIZED or not check_database_ready():
+            return """
+            <script>
+                window.location.href = '/database-status';
+            </script>
+            """
+        
         # 基本統計
         total_students = Student.select().count()
         total_messages = Message.select().count()
@@ -686,6 +1061,7 @@ def index():
         # 系統狀態
         ai_status = "✅ 正常" if model else "❌ 未配置"
         line_status = "✅ 正常" if (line_bot_api and handler) else "❌ 未配置"
+        db_status = "✅ 正常" if DATABASE_INITIALIZED else "❌ 初始化失敗"
         
         # 執行會話清理
         cleanup_result = manage_conversation_sessions()
@@ -701,6 +1077,10 @@ def index():
         <div class="status-item">
             <span>📱 LINE Bot 連接</span>
             <span class="status-ok">{line_status}</span>
+        </div>
+        <div class="status-item">
+            <span>💾 資料庫狀態</span>
+            <span class="status-ok">{db_status}</span>
         </div>
         <div class="status-item">
             <span>🧠 記憶功能</span>
@@ -733,13 +1113,13 @@ def index():
         
         cleanup_message = f"✅ 會話自動清理完成：清理了 {cleanup_count} 個舊會話"
         
-        index_html = f"""
+        return f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EMI 智能教學助理系統 - 精簡版</title>
+    <title>EMI 智能教學助理系統 - Railway 修復版</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -859,14 +1239,16 @@ def index():
         .btn-success:hover {{ background: #219a52; }}
         .btn-orange {{ background: #f39c12; }}
         .btn-orange:hover {{ background: #d68910; }}
+        .btn-danger {{ background: #e74c3c; }}
+        .btn-danger:hover {{ background: #c0392b; }}
     </style>
 </head>
 <body>
     <div class="container">
         <!-- 系統標題 -->
         <div class="header">
-            <h1>🎓 EMI 智能教學助理系統 <span class="version-badge">精簡版 v4.2</span></h1>
-            <p>Practical Applications of AI in Life and Learning - 支援記憶功能，修復語法錯誤</p>
+            <h1>🎓 EMI 智能教學助理系統 <span class="version-badge">Railway 修復版 v4.2.1</span></h1>
+            <p>Practical Applications of AI in Life and Learning - Railway 部署修復版</p>
         </div>
         
         <!-- 清理結果提示 -->
@@ -888,176 +1270,173 @@ def index():
         <!-- 快速操作 -->
         <div class="quick-actions">
             <div class="action-card">
-                <h4 style="color: #3498db; margin-bottom: 15px;">👥 學生管理</h4>
-                <p style="color: #7f8c8d; font-size: 0.9em; margin-bottom: 20px;">
-                    查看學生清單、對話記錄和會話統計
-                </p>
-                <a href="/students" class="action-btn">查看學生</a>
+                <h4>👥 學生管理</h4>
+                <p>查看學生名單、註冊狀態和基本統計</p>
+                <a href="/students" class="action-btn">進入管理</a>
             </div>
             
             <div class="action-card">
-                <h4 style="color: #27ae60; margin-bottom: 15px;">🔧 系統檢查</h4>
-                <p style="color: #7f8c8d; font-size: 0.9em; margin-bottom: 20px;">
-                    檢查系統狀態和記憶功能運作情況
-                </p>
-                <a href="/health" class="action-btn btn-success">系統診斷</a>
+                <h4>🔍 系統檢查</h4>
+                <p>詳細的系統健康檢查和狀態報告</p>
+                <a href="/health" class="action-btn btn-success">健康檢查</a>
             </div>
             
             <div class="action-card">
-                <h4 style="color: #f39c12; margin-bottom: 15px;">📊 資料匯出</h4>
-                <p style="color: #7f8c8d; font-size: 0.9em; margin-bottom: 20px;">
-                    匯出學生清單、對話記錄和會話資料（TSV格式）
-                </p>
-                <a href="/export" class="action-btn btn-orange">匯出資料</a>
+                <h4>📊 API 統計</h4>
+                <p>查看 API 調用統計和系統效能指標</p>
+                <a href="/api/stats" class="action-btn btn-orange">API 統計</a>
+            </div>
+            
+            <div class="action-card">
+                <h4>🔧 緊急修復</h4>
+                <p>如果遇到資料庫問題，可使用緊急修復工具</p>
+                <a href="/setup-database-force" class="action-btn btn-danger">修復資料庫</a>
             </div>
         </div>
         
-        <!-- 版本資訊 -->
-        <div style="margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 0.9em;">
-            <p>EMI 智能教學助理系統 v4.2.0（精簡版 - 保留記憶功能）| 
-            <a href="/health" style="color: #3498db;">系統狀態</a> | 
-            <a href="/api/stats" style="color: #3498db;">API狀態</a> | 
-            更新日期：2025年6月29日</p>
+        <!-- 系統資訊 -->
+        <div style="margin-top: 40px; padding: 20px; background: #f1f2f6; border-radius: 10px; text-align: center;">
+            <h4 style="color: #2f3542; margin-bottom: 15px;">📋 系統資訊</h4>
+            <p style="color: #57606f; margin: 5px 0;">
+                <strong>版本:</strong> EMI Teaching Assistant v4.2.1 (Railway 修復版)<br>
+                <strong>部署環境:</strong> Railway PostgreSQL + Flask<br>
+                <strong>記憶功能:</strong> ✅ 已啟用 - 支援上下文記憶和會話管理<br>
+                <strong>最後更新:</strong> 2025年6月30日
+            </p>
         </div>
     </div>
 </body>
 </html>
         """
         
-        return index_html
-        
     except Exception as e:
-        logger.error(f"首頁生成錯誤: {e}")
-        return f"首頁載入錯誤: {str(e)}", 500
+        logger.error(f"❌ 首頁載入錯誤: {e}")
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>🚨 系統載入錯誤</title>
+    <style>
+        body {{ font-family: sans-serif; margin: 20px; background: #f8f9fa; }}
+        .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
+        .error {{ background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 5px; }}
+        .btn {{ display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 5px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚨 系統載入錯誤</h1>
+        <div class="error">
+            <strong>錯誤詳情:</strong><br>
+            {str(e)}
+        </div>
+        
+        <h3>🔧 建議解決方案:</h3>
+        <ol>
+            <li><a href="/database-status">檢查資料庫狀態</a></li>
+            <li><a href="/setup-database-force">手動修復資料庫</a></li>
+            <li><a href="/health">執行系統健康檢查</a></li>
+        </ol>
+        
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/setup-database-force" class="btn">🔧 緊急修復</a>
+            <a href="/" class="btn" style="background: #28a745;">🔄 重新載入</a>
+        </div>
+    </div>
+</body>
+</html>
+        """
 
 @app.route('/students')
-def students():
-    """學生列表頁面（簡化版）"""
+def students_list():
+    """學生管理頁面（含資料庫檢查）"""
     try:
+        # 檢查資料庫是否就緒
+        if not DATABASE_INITIALIZED or not check_database_ready():
+            return """
+            <script>
+                window.location.href = '/database-status';
+            </script>
+            """
+        
         # 取得所有學生
-        students_list = list(Student.select().order_by(Student.created_at.desc()))
+        students = list(Student.select().order_by(Student.created_at.desc()))
         
-        # 基本統計
-        total_students = len(students_list)
-        total_messages = Message.select().count()
-        total_sessions = ConversationSession.select().count()
+        # 統計資料
+        total_students = len(students)
+        registered_students = len([s for s in students if s.registration_step == 0])
+        pending_students = len([s for s in students if s.registration_step > 0])
         
-        # 生成學生表格行（修復：避免巢狀 f-string）
-        student_rows = []
-        for student in students_list:
-            try:
-                # 基本統計
-                message_count = Message.select().where(Message.student == student).count()
-                session_count = ConversationSession.select().where(
-                    ConversationSession.student == student
-                ).count()
-                active_sessions = ConversationSession.select().where(
-                    ConversationSession.student == student,
-                    ConversationSession.session_end.is_null()
-                ).count()
-                
-                # 註冊狀態
-                if student.registration_step == 0:
-                    status_text = "已完成"
-                    status_class = "status-completed"
-                else:
-                    status_text = f"進行中 (步驟 {student.registration_step})"
-                    status_class = "status-progress"
-                
-                # 最後活動時間
-                last_active_text = ""
-                if student.last_active:
-                    last_active_text = student.last_active.strftime('%Y-%m-%d %H:%M')
-                elif student.created_at:
-                    last_active_text = student.created_at.strftime('%Y-%m-%d %H:%M')
-                else:
-                    last_active_text = "未知"
-                
-                # 學生資訊
-                student_name = student.name or '未設定'
-                student_id_display = getattr(student, 'student_id', '') or '未設定'
-                
-                # 生成行HTML
-                row_html = f"""
-                    <tr>
-                        <td>
-                            <div class="student-name">{student_name}</div>
-                            <small>學號：{student_id_display}</small>
-                        </td>
-                        <td>{message_count}</td>
-                        <td>
-                            <strong>{session_count}</strong><br>
-                            <small>活躍：{active_sessions}</small>
-                        </td>
-                        <td>
-                            <span class="status-badge {status_class}">{status_text}</span>
-                        </td>
-                        <td>{last_active_text}</td>
-                        <td>
-                            <a href="/student/{student.id}" class="action-btn btn-primary">詳細資料</a>
-                            <a href="/students/{student.id}/summary" class="action-btn btn-info">學習摘要</a>
-                        </td>
-                    </tr>
-                """
-                student_rows.append(row_html)
-                
-            except Exception as e:
-                logger.error(f"處理學生 {student.id} 統計時錯誤: {e}")
-                # 加入錯誤處理行
-                error_name = getattr(student, 'name', '未知') or '未設定'
-                row_html = f"""
-                    <tr>
-                        <td>{error_name}</td>
-                        <td>-</td>
-                        <td>-</td>
-                        <td>錯誤</td>
-                        <td>-</td>
-                        <td>資料錯誤</td>
-                    </tr>
-                """
-                student_rows.append(row_html)
+        # 生成學生列表 HTML
+        student_rows = ""
+        for student in students:
+            # 計算統計
+            msg_count = Message.select().where(Message.student == student).count()
+            session_count = ConversationSession.select().where(ConversationSession.student == student).count()
+            
+            # 註冊狀態
+            if student.registration_step == 0:
+                status_badge = '<span style="background: #28a745; color: white; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">✅ 已註冊</span>'
+            elif student.registration_step == 1:
+                status_badge = '<span style="background: #ffc107; color: #212529; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">⏳ 等待學號</span>'
+            elif student.registration_step == 2:
+                status_badge = '<span style="background: #17a2b8; color: white; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">⏳ 等待姓名</span>'
+            elif student.registration_step == 3:
+                status_badge = '<span style="background: #6f42c1; color: white; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">⏳ 等待確認</span>'
+            else:
+                status_badge = '<span style="background: #dc3545; color: white; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">❌ 需重設</span>'
+            
+            # 最後活動時間
+            last_active = student.last_active.strftime('%m/%d %H:%M') if student.last_active else '無'
+            
+            student_rows += f"""
+            <tr>
+                <td>{student.id}</td>
+                <td><strong>{student.name or '未設定'}</strong></td>
+                <td><code>{student.student_id or '未設定'}</code></td>
+                <td>{status_badge}</td>
+                <td style="text-align: center;">{msg_count}</td>
+                <td style="text-align: center;">{session_count}</td>
+                <td>{last_active}</td>
+                <td>
+                    <a href="/student/{student.id}" style="background: #007bff; color: white; padding: 5px 10px; border-radius: 3px; text-decoration: none; font-size: 0.8em;">
+                        📋 詳細
+                    </a>
+                </td>
+            </tr>
+            """
         
-        # 合併所有學生行
-        students_table_content = ''.join(student_rows)
-        
-        # 生成學生列表HTML（修復版）
-        students_html = f"""
+        return f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>學生管理 - EMI 智能教學助理系統</title>
+    <title>👥 學生管理 - EMI 智能教學助理</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
             margin: 0;
             padding: 20px;
-            background: #f8f9fa;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
         }}
         .container {{
             max-width: 1400px;
             margin: 0 auto;
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }}
         .header {{
-            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 30px;
         }}
-        .back-button {{
-            display: inline-block;
-            padding: 8px 16px;
-            background: rgba(255,255,255,0.2);
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }}
-        
-        /* 統計概覽 */
-        .stats-overview {{
+        .stats-row {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
@@ -1074,33 +1453,24 @@ def students():
             font-size: 2em;
             font-weight: bold;
             color: #2c3e50;
+            margin-bottom: 5px;
         }}
         .stat-label {{
             color: #7f8c8d;
             font-size: 0.9em;
-            margin-top: 5px;
-        }}
-        
-        /* 學生表格 */
-        .table-container {{
-            background: white;
-            border-radius: 15px;
-            overflow: hidden;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        }}
-        .table-header {{
-            background: #34495e;
-            color: white;
-            padding: 20px 30px;
         }}
         table {{
             width: 100%;
             border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         }}
         th, td {{
-            padding: 12px 15px;
+            padding: 12px;
             text-align: left;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid #e9ecef;
         }}
         th {{
             background: #f8f9fa;
@@ -1110,461 +1480,72 @@ def students():
         tr:hover {{
             background: #f8f9fa;
         }}
-        .student-name {{
-            font-weight: bold;
-            color: #2c3e50;
-        }}
-        .status-badge {{
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.8em;
-            font-weight: bold;
-        }}
-        .status-completed {{
-            background: #d4edda;
-            color: #155724;
-        }}
-        .status-progress {{
-            background: #fff3cd;
-            color: #856404;
-        }}
-        .action-btn {{
-            padding: 6px 12px;
+        .btn {{
+            display: inline-block;
+            padding: 10px 20px;
             border-radius: 5px;
             text-decoration: none;
-            font-size: 0.8em;
-            margin: 2px;
-            display: inline-block;
+            font-weight: bold;
+            margin: 5px;
         }}
-        .btn-primary {{
-            background: #3498db;
-            color: white;
-        }}
-        .btn-info {{
-            background: #17a2b8;
-            color: white;
-        }}
+        .btn-primary {{ background: #007bff; color: white; }}
+        .btn-success {{ background: #28a745; color: white; }}
+        .btn-secondary {{ background: #6c757d; color: white; }}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <a href="/" class="back-button">← 返回首頁</a>
-            <h1>👥 學生管理系統</h1>
-            <p>EMI 智能教學助理系統 - 精簡版學生管理</p>
+            <h1 style="color: #2c3e50; margin: 0;">👥 學生管理</h1>
+            <div>
+                <a href="/" class="btn btn-secondary">🏠 返回首頁</a>
+                <a href="/students/export" class="btn btn-success">📤 匯出清單</a>
+            </div>
         </div>
         
-        <!-- 統計概覽 -->
-        <div class="stats-overview">
+        <!-- 統計摘要 -->
+        <div class="stats-row">
             <div class="stat-box">
                 <div class="stat-number">{total_students}</div>
-                <div class="stat-label">總學生數</div>
+                <div class="stat-label">👥 總學生數</div>
             </div>
             <div class="stat-box">
-                <div class="stat-number">{total_messages}</div>
-                <div class="stat-label">總對話數</div>
+                <div class="stat-number">{registered_students}</div>
+                <div class="stat-label">✅ 已完成註冊</div>
             </div>
             <div class="stat-box">
-                <div class="stat-number">{total_sessions}</div>
-                <div class="stat-label">總會話數</div>
+                <div class="stat-number">{pending_students}</div>
+                <div class="stat-label">⏳ 註冊進行中</div>
             </div>
         </div>
         
         <!-- 學生列表 -->
-        <div class="table-container">
-            <div class="table-header">
-                <h3 style="margin: 0;">📋 學生清單</h3>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>學生資訊</th>
-                        <th>對話數</th>
-                        <th>會話統計</th>
-                        <th>註冊狀態</th>
-                        <th>最後活動</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody>
-{students_table_content}
-                </tbody>
-            </table>
-        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>姓名</th>
+                    <th>學號</th>
+                    <th>註冊狀態</th>
+                    <th>訊息數</th>
+                    <th>會話數</th>
+                    <th>最後活動</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {student_rows or '<tr><td colspan="8" style="text-align: center; color: #999; padding: 40px;">尚無學生資料</td></tr>'}
+            </tbody>
+        </table>
         
-        <!-- 快速操作 -->
-        <div style="margin-top: 30px; text-align: center;">
-            <a href="/export" class="action-btn" style="padding: 12px 24px; font-size: 1em; background: #f39c12; color: white; text-decoration: none; border-radius: 5px;">📊 匯出學生資料</a>
-        </div>
-    </div>
-</body>
-</html>
-        """
-        
-        return students_html
-        
-    except Exception as e:
-        logger.error(f"學生列表生成錯誤: {e}")
-        return f"學生列表載入錯誤: {str(e)}", 500
-
-@app.route('/student/<int:student_id>')
-def student_detail(student_id):
-    """學生詳細頁面（簡化版，保留記憶功能資訊）"""
-    try:
-        # 取得學生資料
-        try:
-            student = Student.get_by_id(student_id)
-        except Student.DoesNotExist:
-            return """
-            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-                <h1>❌ 學生不存在</h1>
-                <p>無法找到指定的學生記錄</p>
-                <a href="/students" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回學生列表</a>
-            </div>
-            """
-        
-        # 取得對話記錄
-        messages = list(Message.select().where(
-            Message.student == student
-        ).order_by(Message.timestamp.desc()).limit(20))
-        
-        # 取得會話統計
-        all_sessions = list(ConversationSession.select().where(
-            ConversationSession.student == student
-        ).order_by(ConversationSession.session_start.desc()))
-        
-        active_session = student.get_active_session()
-        session_count = len(all_sessions)
-        total_messages = Message.select().where(Message.student == student).count()
-        
-        # 生成訊息列表（修復：避免巢狀 f-string）
-        messages_content = ""
-        if messages:
-            message_items = []
-            for message in messages:
-                msg_icon = "👤" if message.source_type in ['line', 'student'] else "🤖"
-                msg_time = message.timestamp.strftime('%m月%d日 %H:%M') if message.timestamp else '未知時間'
-                
-                # 會話資訊
-                session_info = ""
-                if message.session:
-                    session_info = f" | 會話 #{message.session.id}"
-                
-                # 訊息內容預覽
-                content_preview = message.content[:200]
-                if len(message.content) > 200:
-                    content_preview += "..."
-                
-                message_item = f"""
-                    <div class="message-item">
-                        <div class="message-meta">
-                            {msg_icon} {msg_time} • {'學生' if message.source_type in ['line', 'student'] else 'AI助理'}{session_info}
-                        </div>
-                        <div class="message-content">{content_preview}</div>
-                    </div>
-                """
-                message_items.append(message_item)
-            
-            messages_content = ''.join(message_items)
-        else:
-            messages_content = """
-                <div style="text-align: center; padding: 40px; color: #6c757d;">
-                    <div style="font-size: 3em; margin-bottom: 15px;">💭</div>
-                    <h4>尚無對話記錄</h4>
-                    <p>這位學生還沒有開始與AI助理的對話。</p>
-                </div>
-            """
-        
-        # 會話統計顯示
-        memory_status = ""
-        if active_session:
-            memory_status = '<div class="memory-status">🧠 <strong>記憶功能已啟用</strong> - AI能記住前幾輪對話，支援深入追問和連續討論</div>'
-        else:
-            memory_status = '<div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin-bottom: 20px;">💤 目前無活躍會話 - 下次對話時會自動開始新的記憶會話</div>'
-        
-        # 學生資訊
-        student_name = student.name or '未設定'
-        student_id_display = getattr(student, 'student_id', '未設定') or '未設定'
-        created_date = student.created_at.strftime('%Y年%m月%d日') if student.created_at else '未知'
-        
-        # 生成詳細頁面HTML（修復版）
-        detail_html = f"""
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{student_name} - 學生詳細資料</title>
-    <style>
-        body {{ font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #f8f9fa; }}
-        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 0; }}
-        .container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
-        .student-header {{ text-align: center; }}
-        .student-name {{ font-size: 2.5em; margin-bottom: 10px; }}
-        .student-id {{ opacity: 0.8; font-size: 1.1em; }}
-        .content-section {{ background: white; padding: 25px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); margin: 20px 0; }}
-        .section-title {{ font-size: 1.3em; font-weight: bold; margin-bottom: 20px; color: #495057; }}
-        .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; }}
-        .stat-item {{ text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px; }}
-        .stat-number {{ font-size: 1.8em; font-weight: bold; color: #007bff; }}
-        .stat-label {{ color: #6c757d; font-size: 0.9em; margin-top: 5px; }}
-        .memory-status {{ background: #e8f5e8; border: 1px solid #28a745; padding: 15px; border-radius: 8px; margin-bottom: 20px; }}
-        .message-list {{ max-height: 600px; overflow-y: auto; }}
-        .message-item {{ background: #f8f9fa; margin-bottom: 15px; padding: 15px; border-radius: 10px; }}
-        .message-meta {{ font-size: 0.8em; color: #6c757d; margin-bottom: 8px; }}
-        .message-content {{ line-height: 1.5; }}
-        .back-button {{ display: inline-block; padding: 10px 20px; background: rgba(255,255,255,0.2); color: white; text-decoration: none; border-radius: 5px; margin-bottom: 20px; }}
-        .action-buttons {{ display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }}
-        .btn {{ padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; }}
-        .btn-success {{ background: #28a745; color: white; }}
-        .btn-info {{ background: #17a2b8; color: white; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="container">
-            <a href="/students" class="back-button">← 返回學生列表</a>
-            <div class="student-header">
-                <h1 class="student-name">{student_name}</h1>
-                <p class="student-id">學號: {student_id_display} | 註冊: {created_date}</p>
-            </div>
-        </div>
-    </div>
-    
-    <div class="container">
-        <!-- 統計區塊 -->
-        <div class="content-section">
-            <div class="section-title">📊 學習統計（含記憶功能）</div>
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <div class="stat-number">{total_messages}</div>
-                    <div class="stat-label">總對話數</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">{session_count}</div>
-                    <div class="stat-label">會話次數</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">{1 if active_session else 0}</div>
-                    <div class="stat-label">活躍會話</div>
-                </div>
-            </div>
-            
-            <!-- 記憶狀態 -->
-            {memory_status}
-            
-            <div class="action-buttons">
-                <a href="/students/{student.id}/summary" class="btn btn-success">📋 學習摘要</a>
-                <a href="/api/conversations/{student.id}" class="btn btn-info">📊 API數據</a>
-            </div>
-        </div>
-        
-        <!-- 對話記錄 -->
-        <div class="content-section">
-            <div class="section-title">💬 最近對話記錄</div>
-            <div class="message-list">
-                {messages_content}
-            </div>
-            <div style="margin-top: 15px; text-align: center; padding: 10px; background: #fff3cd; border-radius: 5px; font-size: 0.9em;">
-                📋 顯示最近20條記錄，共有 {total_messages} 條對話，{session_count} 個會話
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-        """
-        
-        return detail_html
-        
-    except Exception as e:
-        logger.error(f"❌ 學生詳細資料載入錯誤: {e}")
-        return f"""
-        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-            <h1>❌ 載入錯誤</h1>
-            <p style="color: #dc3545;">學生詳細資料載入失敗：{str(e)}</p>
-            <a href="/students" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回學生列表</a>
-        </div>
-        """
-
-# =================== 第2段結束標記 ===================
-# 🔸 第2段結束 - 下一段：學習摘要、資料匯出、API和系統工具
-
-# =================== EMI 智能教學助理 - 精簡修復版 app.py ===================
-# 🔸 第 3 段：學習摘要、資料匯出、API和系統工具（第 1501 行-結束）
-# 接續第2段，包含：學習摘要、資料匯出、API端點、系統工具、錯誤處理、啟動配置
-
-@app.route('/students/<int:student_id>/summary')
-def student_summary(student_id):
-    """學生學習摘要頁面（簡化版）"""
-    try:
-        # 取得學生資料
-        try:
-            student = Student.get_by_id(student_id)
-        except Student.DoesNotExist:
-            return """
-            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-                <h1>❌ 學生不存在</h1>
-                <p>無法找到指定的學生記錄</p>
-                <a href="/students" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回學生列表</a>
-            </div>
-            """
-        
-        # 生成學習摘要
-        learning_summary = generate_simple_learning_summary(student)
-        
-        # 基本統計
-        total_messages = Message.select().where(Message.student == student).count()
-        learning_days = 0
-        if student.created_at:
-            learning_days = (datetime.datetime.now() - student.created_at).days + 1
-        
-        summary_html = f"""
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📊 {student.name} - 學習摘要</title>
-    <style>
-        body {{ font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }}
-        .container {{ max-width: 800px; margin: 0 auto; background: white; border-radius: 15px; padding: 30px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }}
-        .header {{ text-align: center; margin-bottom: 30px; }}
-        .student-name {{ font-size: 2em; color: #333; margin-bottom: 10px; }}
-        .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 30px; }}
-        .stat-item {{ background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; }}
-        .stat-number {{ font-size: 1.5em; font-weight: bold; color: #007bff; }}
-        .summary-content {{ background: #f8fafc; padding: 25px; border-radius: 10px; line-height: 1.7; white-space: pre-wrap; border-left: 4px solid #17a2b8; }}
-        .back-button {{ display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin-bottom: 20px; }}
-        .action-buttons {{ display: flex; gap: 10px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }}
-        .btn {{ padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; }}
-        .btn-info {{ background: #17a2b8; color: white; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <a href="/students" class="back-button">← 返回學生列表</a>
-        
-        <div class="header">
-            <div class="student-name">👤 {student.name}</div>
-            <p>📊 個人學習摘要（簡化版）</p>
-        </div>
-        
-        <div class="stats">
-            <div class="stat-item">
-                <div class="stat-number">{total_messages}</div>
-                <div>總對話數</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-number">{learning_days}</div>
-                <div>學習天數</div>
-            </div>
-        </div>
-        
-        <div class="summary-content">{learning_summary}</div>
-        
-        <div class="action-buttons">
-            <a href="/student/{student_id}" class="btn btn-info">📊 查看對話記錄</a>
-        </div>
-    </div>
-</body>
-</html>
-        """
-        
-        return summary_html
-        
-    except Exception as e:
-        logger.error(f"❌ 學生摘要頁面錯誤: {e}")
-        return f"""
-        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-            <h1>📊 學習摘要</h1>
-            <p style="color: #dc3545;">摘要生成錯誤：{str(e)}</p>
-            <a href="/students" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">返回學生列表</a>
-        </div>
-        """
-
-# =================== 簡化資料匯出（僅TSV）===================
-@app.route('/export')
-def export_data():
-    """資料匯出頁面（簡化版 - 僅TSV）"""
-    try:
-        # 基本統計
-        student_count = Student.select().count()
-        message_count = Message.select().count()
-        session_count = ConversationSession.select().count()
-        
-        export_html = f"""
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>資料匯出 - EMI 智能教學助理</title>
-    <style>
-        body {{ font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #f8f9fa; }}
-        .header {{ background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 30px 0; }}
-        .container {{ max-width: 1000px; margin: 0 auto; padding: 20px; }}
-        .page-title {{ text-align: center; font-size: 2.5em; margin-bottom: 10px; }}
-        .page-subtitle {{ text-align: center; opacity: 0.9; }}
-        .export-card {{ background: white; border-radius: 15px; padding: 25px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); margin: 20px 0; }}
-        .export-item {{ display: flex; justify-content: space-between; align-items: center; padding: 20px; border: 1px solid #eee; border-radius: 10px; margin: 15px 0; }}
-        .export-info {{ flex: 1; }}
-        .export-title {{ font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }}
-        .export-desc {{ color: #666; font-size: 0.9em; }}
-        .export-count {{ background: #e9ecef; padding: 5px 10px; border-radius: 15px; font-size: 0.8em; margin: 5px 0; }}
-        .export-btn {{ background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; }}
-        .export-btn:hover {{ background: #0056b3; }}
-        .back-button {{ display: inline-block; padding: 10px 20px; background: rgba(255,255,255,0.2); color: white; text-decoration: none; border-radius: 5px; margin-bottom: 20px; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="container">
-            <a href="/" class="back-button">← 返回首頁</a>
-            <h1 class="page-title">📁 資料匯出</h1>
-            <p class="page-subtitle">匯出系統資料進行分析或備份（TSV格式）</p>
-        </div>
-    </div>
-    
-    <div class="container">
-        <div class="export-card">
-            <h3>📊 基礎資料匯出</h3>
-            
-            <div class="export-item">
-                <div class="export-info">
-                    <div class="export-title">學生名單</div>
-                    <div class="export-desc">包含學生基本資訊、註冊狀態等</div>
-                    <div class="export-count">總計: {student_count} 位學生</div>
-                </div>
-                <a href="/download/students" class="export-btn">下載 TSV</a>
-            </div>
-            
-            <div class="export-item">
-                <div class="export-info">
-                    <div class="export-title">對話記錄</div>
-                    <div class="export-desc">完整的師生對話記錄，包含時間戳記和會話ID</div>
-                    <div class="export-count">總計: {message_count} 則訊息</div>
-                </div>
-                <a href="/download/messages" class="export-btn">下載 TSV</a>
-            </div>
-            
-            <div class="export-item">
-                <div class="export-info">
-                    <div class="export-title">對話會話記錄</div>
-                    <div class="export-desc">記憶功能會話資料，包含會話時長、訊息數量等</div>
-                    <div class="export-count">總計: {session_count} 個會話</div>
-                </div>
-                <a href="/download/sessions" class="export-btn">下載 TSV</a>
-            </div>
-        </div>
-        
-        <div class="export-card">
-            <h3>⚠️ 匯出說明</h3>
-            <ul>
-                <li>所有匯出檔案均為 TSV 格式（Tab-Separated Values），可用 Excel 或試算表軟體開啟</li>
-                <li>包含完整的 UTF-8 編碼，支援中文字符</li>
-                <li>時間格式為 ISO 8601 標準（YYYY-MM-DD HH:MM:SS）</li>
-                <li>記憶功能相關資料包含對話上下文資訊</li>
-                <li>敏感資訊已適當處理，確保隱私安全</li>
+        <!-- 操作說明 -->
+        <div style="margin-top: 30px; padding: 20px; background: #e3f2fd; border-radius: 10px;">
+            <h4 style="color: #1976d2; margin-bottom: 10px;">📋 學生管理說明</h4>
+            <ul style="color: #1565c0; margin: 0;">
+                <li><strong>註冊流程:</strong> 學生透過 LINE Bot 自動完成三步驟註冊（學號 → 姓名 → 確認）</li>
+                <li><strong>活動追蹤:</strong> 系統自動記錄學生的對話次數、會話數量和最後活動時間</li>
+                <li><strong>詳細資訊:</strong> 點擊「詳細」可查看個別學生的完整學習歷程和對話記錄</li>
+                <li><strong>資料匯出:</strong> 可將學生清單匯出為 TSV 格式，方便進一步分析</li>
             </ul>
         </div>
     </div>
@@ -1572,146 +1553,648 @@ def export_data():
 </html>
         """
         
-        return export_html
+    except Exception as e:
+        logger.error(f"❌ 學生列表載入錯誤: {e}")
+        return f"""
+        <h1>❌ 載入錯誤</h1>
+        <p>學生列表載入時發生錯誤: {str(e)}</p>
+        <a href="/">返回首頁</a>
+        """
+
+# =================== 第2段結束標記 ===================
+# 🔸 第2段結束 - 下一段：學生詳細頁面、API端點和系統工具
+
+# =================== EMI 智能教學助理 - Railway 修復版 app.py ===================
+# 🔸 第 3 段：學生管理、API端點和系統工具（第 1501 行 - 結束）
+# 接續第2段，包含：學生管理頁面、資料匯出、API端點、錯誤處理、啟動配置
+
+        <!-- 快速操作 -->
+        <div class="quick-actions">
+            <div class="action-card">
+                <h4>👥 學生管理</h4>
+                <p>檢視和管理所有學生資料</p>
+                <a href="/students" class="action-btn">學生管理</a>
+            </div>
+            
+            <div class="action-card">
+                <h4>📊 健康檢查</h4>
+                <p>檢查系統各項服務狀態</p>
+                <a href="/health" class="action-btn btn-success">健康檢查</a>
+            </div>
+            
+            <div class="action-card">
+                <h4>💾 資料匯出</h4>
+                <p>匯出學生對話記錄資料</p>
+                <a href="/export/tsv" class="action-btn btn-orange">匯出 TSV</a>
+            </div>
+            
+            <div class="action-card">
+                <h4>🔧 資料庫修復</h4>
+                <p>緊急資料庫修復工具</p>
+                <a href="/setup-database-force" class="action-btn btn-danger">緊急修復</a>
+            </div>
+        </div>
+        
+        <!-- 使用說明 -->
+        <div style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+            <h3 style="color: #2c3e50;">📱 LINE Bot 使用說明</h3>
+            <ol style="color: #666;">
+                <li>學生加入 LINE Bot 好友</li>
+                <li>系統自動引導完成註冊</li>
+                <li>開始與 AI 助理對話學習</li>
+                <li>系統具備記憶功能，能夠延續對話脈絡</li>
+            </ol>
+        </div>
+        
+        <!-- 版本資訊 -->
+        <div style="text-align: center; margin-top: 30px; color: #999; font-size: 0.9em;">
+            <p>🚀 Railway 部署修復版 | 🧠 記憶功能已啟用 | 🔄 自動會話管理</p>
+            <p>更新時間: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        </div>
+    </div>
+</body>
+</html>
+        """
+        
+        return index_html
         
     except Exception as e:
-        logger.error(f"匯出頁面錯誤: {str(e)}")
-        return f"匯出頁面錯誤: {str(e)}", 500
+        logger.error(f"❌ 首頁載入錯誤: {e}")
+        # 如果是資料庫相關錯誤，重定向到修復頁面
+        if "no such table" in str(e) or "database" in str(e).lower():
+            return """
+            <script>
+                alert('檢測到資料庫錯誤，正在跳轉到修復頁面...');
+                window.location.href = '/setup-database-force';
+            </script>
+            """
+        
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>🚨 系統錯誤</title>
+    <style>
+        body {{ font-family: sans-serif; margin: 40px; text-align: center; background: #f8f9fa; }}
+        .error-container {{ max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; }}
+        .error {{ background: #f8d7da; color: #721c24; padding: 20px; border-radius: 5px; margin: 20px 0; }}
+        .btn {{ display: inline-block; padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin: 10px; }}
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <h1>🚨 系統載入失敗</h1>
+        <div class="error">
+            <strong>錯誤詳情:</strong><br>
+            {str(e)}
+        </div>
+        
+        <div>
+            <a href="/setup-database-force" class="btn" style="background: #dc3545;">🔧 緊急修復</a>
+            <a href="/health" class="btn" style="background: #28a745;">🔍 健康檢查</a>
+            <a href="/" class="btn">🔄 重新載入</a>
+        </div>
+    </div>
+</body>
+</html>
+        """
 
-@app.route('/download/students')
-def download_students():
-    """下載學生清單 TSV 檔案"""
+# =================== 學生管理頁面 ===================
+@app.route('/students')
+def students_page():
+    """學生管理頁面（含記憶功能展示）"""
     try:
+        # 檢查資料庫是否就緒
+        if not DATABASE_INITIALIZED or not check_database_ready():
+            return redirect('/database-status')
+        
+        # 獲取所有學生
         students = list(Student.select().order_by(Student.created_at.desc()))
         
-        if not students:
-            return "目前沒有學生記錄可以下載", 404
-        
-        # 生成 TSV 內容
-        tsv_lines = [
-            'ID\t姓名\t學號\t班級\t註冊狀態\t創建時間\t最後活動'
-        ]
-        
+        student_cards = ""
         for student in students:
-            student_id = getattr(student, 'student_id', '') or ''
-            class_name = getattr(student, 'class_name', '') or ''
-            registration_status = "已完成" if student.registration_step == 0 else f"未完成(步驟{student.registration_step})"
-            created_at = student.created_at.strftime('%Y-%m-%d %H:%M:%S') if student.created_at else ''
-            last_active = student.last_active.strftime('%Y-%m-%d %H:%M:%S') if student.last_active else ''
+            # 獲取學生統計
+            total_messages = Message.select().where(Message.student == student).count()
+            total_sessions = ConversationSession.select().where(ConversationSession.student == student).count()
+            active_session = student.get_active_session()
             
-            tsv_lines.append(f"{student.id}\t{student.name}\t{student_id}\t{class_name}\t{registration_status}\t{created_at}\t{last_active}")
+            # 格式化時間
+            last_active_str = student.last_active.strftime('%Y-%m-%d %H:%M') if student.last_active else '從未活躍'
+            created_str = student.created_at.strftime('%Y-%m-%d %H:%M') if student.created_at else '未知'
+            
+            # 學習摘要
+            try:
+                learning_summary = generate_simple_learning_summary(student)
+                summary_preview = learning_summary[:100] + "..." if len(learning_summary) > 100 else learning_summary
+            except:
+                summary_preview = "學習摘要生成中..."
+            
+            # 狀態標籤
+            status_badge = "🟢 活躍" if active_session else "⚪ 休息"
+            registration_status = "✅ 已完成" if student.registration_step == 0 else f"🔄 步驟 {student.registration_step}"
+            
+            student_cards += f"""
+            <div class="student-card">
+                <div class="student-header">
+                    <h3>{student.name}</h3>
+                    <span class="status-badge">{status_badge}</span>
+                </div>
+                
+                <div class="student-info">
+                    <p><strong>🆔 ID:</strong> {student.id}</p>
+                    <p><strong>📱 LINE ID:</strong> {student.line_user_id[-8:]}...</p>
+                    <p><strong>📅 註冊時間:</strong> {created_str}</p>
+                    <p><strong>⏰ 最後活躍:</strong> {last_active_str}</p>
+                    <p><strong>📝 註冊狀態:</strong> {registration_status}</p>
+                </div>
+                
+                <div class="student-stats">
+                    <div class="stat-item">
+                        <span class="stat-number">{total_messages}</span>
+                        <span class="stat-label">對話數</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">{total_sessions}</span>
+                        <span class="stat-label">會話數</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">{'1' if active_session else '0'}</span>
+                        <span class="stat-label">活躍會話</span>
+                    </div>
+                </div>
+                
+                <div class="learning-preview">
+                    <h4>📊 學習摘要</h4>
+                    <p>{summary_preview}</p>
+                </div>
+                
+                <div class="student-actions">
+                    <a href="/api/learning-summary/{student.id}" class="btn btn-sm">📄 完整學習歷程</a>
+                    <a href="/api/student/{student.id}/conversations" class="btn btn-sm btn-outline">💬 對話記錄</a>
+                </div>
+            </div>
+            """
         
-        # 建立回應
-        tsv_content = '\n'.join(tsv_lines)
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"students_{timestamp}.tsv"
+        if not student_cards:
+            student_cards = """
+            <div class="no-data">
+                <h3>📝 暫無學生資料</h3>
+                <p>當學生開始使用 LINE Bot 時，資料會顯示在這裡。</p>
+                <a href="/" class="btn">返回首頁</a>
+            </div>
+            """
         
-        response = make_response(tsv_content)
-        response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
-        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>👥 學生管理 - EMI 智能教學助理</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+        .header {{
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }}
+        .header h1 {{
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }}
         
-        logger.info(f"📊 學生清單匯出完成: {len(students)} 位學生")
-        return response
+        /* 學生卡片 */
+        .students-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 20px;
+        }}
+        .student-card {{
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }}
+        .student-card:hover {{
+            transform: translateY(-5px);
+        }}
+        .student-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #ecf0f1;
+        }}
+        .student-header h3 {{
+            margin: 0;
+            color: #2c3e50;
+        }}
+        .status-badge {{
+            background: #3498db;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.8em;
+        }}
+        
+        .student-info {{
+            margin-bottom: 15px;
+        }}
+        .student-info p {{
+            margin: 5px 0;
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }}
+        
+        .student-stats {{
+            display: flex;
+            justify-content: space-around;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }}
+        .stat-item {{
+            text-align: center;
+        }}
+        .stat-number {{
+            display: block;
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #3498db;
+        }}
+        .stat-label {{
+            font-size: 0.8em;
+            color: #7f8c8d;
+        }}
+        
+        .learning-preview {{
+            background: #e8f4fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }}
+        .learning-preview h4 {{
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 0.9em;
+        }}
+        .learning-preview p {{
+            margin: 0;
+            color: #666;
+            font-size: 0.85em;
+            line-height: 1.4;
+        }}
+        
+        .student-actions {{
+            display: flex;
+            gap: 10px;
+        }}
+        .btn {{
+            background: #3498db;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-size: 0.85em;
+            transition: background 0.3s ease;
+        }}
+        .btn:hover {{
+            background: #2980b9;
+        }}
+        .btn-sm {{
+            padding: 6px 12px;
+            font-size: 0.8em;
+        }}
+        .btn-outline {{
+            background: transparent;
+            color: #3498db;
+            border: 1px solid #3498db;
+        }}
+        .btn-outline:hover {{
+            background: #3498db;
+            color: white;
+        }}
+        
+        .no-data {{
+            text-align: center;
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            color: #7f8c8d;
+        }}
+        
+        .back-btn {{
+            background: #95a5a6;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            text-decoration: none;
+            display: inline-block;
+            margin-bottom: 20px;
+        }}
+        .back-btn:hover {{
+            background: #7f8c8d;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-btn">← 返回首頁</a>
+        
+        <div class="header">
+            <h1>👥 學生管理系統</h1>
+            <p>記憶功能已啟用 - 支援會話脈絡延續</p>
+        </div>
+        
+        <div class="students-grid">
+            {student_cards}
+        </div>
+    </div>
+</body>
+</html>
+        """
         
     except Exception as e:
-        logger.error(f"學生清單下載錯誤: {e}")
-        return f"學生清單下載失敗: {str(e)}", 500
+        logger.error(f"❌ 學生管理頁面錯誤: {e}")
+        return f"""
+        <div style="text-align: center; margin: 50px;">
+            <h2>⚠️ 學生管理頁面載入失敗</h2>
+            <p>錯誤: {str(e)}</p>
+            <a href="/" style="background: #3498db; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">返回首頁</a>
+        </div>
+        """
 
-@app.route('/download/messages')
-def download_messages():
-    """下載對話記錄 TSV 檔案"""
+# =================== 資料匯出功能 ===================
+@app.route('/export/tsv')
+def export_tsv():
+    """匯出學生對話資料為 TSV 格式"""
     try:
-        messages = list(Message.select().join(Student).order_by(Message.timestamp.desc()))
+        # 檢查資料庫是否就緒
+        if not DATABASE_INITIALIZED or not check_database_ready():
+            return "資料庫未就緒，請稍後再試", 500
         
-        if not messages:
-            return "目前沒有對話記錄可以下載", 404
+        # 查詢所有對話資料
+        messages = Message.select(
+            Message.id,
+            Message.content,
+            Message.ai_response,
+            Message.timestamp,
+            Message.topic_tags,
+            Student.name,
+            Student.line_user_id,
+            ConversationSession.id.alias('session_id')
+        ).join(Student).join(ConversationSession, join_type='LEFT').order_by(Message.timestamp)
         
         # 生成 TSV 內容
-        tsv_lines = [
-            'ID\t學生姓名\t學生ID\t訊息內容\tAI回應\t時間\t會話ID\t主題標籤'
-        ]
+        tsv_lines = []
+        tsv_lines.append("訊息ID\t學生姓名\tLINE用戶ID\t會話ID\t學生訊息\tAI回應\t時間戳記\t主題標籤")
         
         for message in messages:
-            student_name = message.student.name if message.student else '未知學生'
-            student_id = getattr(message.student, 'student_id', '') if message.student else ''
-            content = (message.content or '').replace('\n', ' ').replace('\t', ' ')[:500]
-            ai_response = (message.ai_response or '').replace('\n', ' ').replace('\t', ' ')[:500]
-            timestamp = message.timestamp.strftime('%Y-%m-%d %H:%M:%S') if message.timestamp else ''
-            session_id = str(message.session.id) if message.session else ''
-            topic_tags = (message.topic_tags or '').replace('\t', ' ')
+            line_user_id_short = message.student.line_user_id[-8:] if message.student.line_user_id else "N/A"
+            session_id = message.session.id if message.session else "N/A"
+            timestamp_str = message.timestamp.strftime('%Y-%m-%d %H:%M:%S') if message.timestamp else "N/A"
             
-            tsv_lines.append(f"{message.id}\t{student_name}\t{student_id}\t{content}\t{ai_response}\t{timestamp}\t{session_id}\t{topic_tags}")
+            # 清理文字中的換行符和製表符
+            student_msg = (message.content or "").replace('\n', ' ').replace('\t', ' ')
+            ai_response = (message.ai_response or "").replace('\n', ' ').replace('\t', ' ')
+            topic_tags = (message.topic_tags or "").replace('\n', ' ').replace('\t', ' ')
+            
+            tsv_lines.append(f"{message.id}\t{message.student.name}\t{line_user_id_short}\t{session_id}\t{student_msg}\t{ai_response}\t{timestamp_str}\t{topic_tags}")
         
-        # 建立回應
         tsv_content = '\n'.join(tsv_lines)
+        
+        # 設置檔案下載回應
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"messages_{timestamp}.tsv"
+        filename = f"emi_conversations_{timestamp}.tsv"
         
         response = make_response(tsv_content)
         response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
         response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.headers['Content-Length'] = len(tsv_content.encode('utf-8'))
         
-        logger.info(f"📊 對話記錄匯出完成: {len(messages)} 則訊息")
+        logger.info(f"✅ TSV 匯出成功: {filename}, 包含 {len(tsv_lines)-1} 筆對話記錄")
         return response
         
     except Exception as e:
-        logger.error(f"對話記錄下載錯誤: {e}")
-        return f"對話記錄下載失敗: {str(e)}", 500
+        logger.error(f"❌ TSV 匯出失敗: {e}")
+        return f"匯出失敗: {str(e)}", 500
 
-@app.route('/download/sessions')
-def download_sessions():
-    """下載會話記錄 TSV 檔案"""
+# =================== API 端點 ===================
+@app.route('/api/student/<int:student_id>/conversations')
+def get_student_conversations(student_id):
+    """取得特定學生的對話記錄 API"""
     try:
-        sessions = list(ConversationSession.select().join(Student).order_by(
-            ConversationSession.session_start.desc()
-        ))
+        # 檢查資料庫是否就緒
+        if not DATABASE_INITIALIZED or not check_database_ready():
+            return jsonify({"error": "資料庫未就緒"}), 500
         
-        if not sessions:
-            return "目前沒有會話記錄可以下載", 404
+        # 查詢學生
+        try:
+            student = Student.get_by_id(student_id)
+        except Student.DoesNotExist:
+            return jsonify({"error": "學生不存在"}), 404
         
-        # 生成 TSV 內容
-        tsv_lines = [
-            '會話ID\t學生姓名\t學生ID\t開始時間\t結束時間\t訊息數量\t狀態\t主題標籤'
-        ]
+        # 查詢對話記錄
+        messages = Message.select().where(
+            Message.student == student
+        ).order_by(Message.timestamp.desc()).limit(50)
         
-        for session in sessions:
-            student_name = session.student.name if session.student else '未知學生'
-            student_id = getattr(session.student, 'student_id', '') if session.student else ''
-            start_time = session.session_start.strftime('%Y-%m-%d %H:%M:%S') if session.session_start else ''
-            end_time = session.session_end.strftime('%Y-%m-%d %H:%M:%S') if session.session_end else ''
-            message_count = str(session.message_count)
-            status = '已完成' if session.session_end else '活躍中'
-            topic_tags = (session.topic_tags or '').replace('\t', ' ')
-            
-            tsv_lines.append(f"{session.id}\t{student_name}\t{student_id}\t{start_time}\t{end_time}\t{message_count}\t{status}\t{topic_tags}")
+        conversations = []
+        for message in messages:
+            conversations.append({
+                "id": message.id,
+                "content": message.content,
+                "ai_response": message.ai_response,
+                "timestamp": message.timestamp.isoformat() if message.timestamp else None,
+                "topic_tags": message.topic_tags,
+                "session_id": message.session.id if message.session else None
+            })
         
-        # 建立回應
-        tsv_content = '\n'.join(tsv_lines)
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"sessions_{timestamp}.tsv"
-        
-        response = make_response(tsv_content)
-        response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
-        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-        
-        logger.info(f"📊 會話記錄匯出完成: {len(sessions)} 個會話")
-        return response
+        return jsonify({
+            "student": {
+                "id": student.id,
+                "name": student.name,
+                "line_user_id": student.line_user_id[-8:] + "..." if student.line_user_id else None
+            },
+            "conversations": conversations,
+            "total_count": len(conversations)
+        })
         
     except Exception as e:
-        logger.error(f"會話記錄下載錯誤: {e}")
-        return f"會話記錄下載失敗: {str(e)}", 500
+        logger.error(f"❌ 學生對話記錄 API 錯誤: {e}")
+        return jsonify({"error": f"API 錯誤: {str(e)}"}), 500
 
-# =================== API 端點（保留）===================
+@app.route('/api/learning-summary/<int:student_id>')
+def get_learning_summary(student_id):
+    """取得學生學習摘要 API"""
+    try:
+        # 檢查資料庫是否就緒
+        if not DATABASE_INITIALIZED or not check_database_ready():
+            return "資料庫未就緒，請稍後再試", 500
+        
+        # 查詢學生
+        try:
+            student = Student.get_by_id(student_id)
+        except Student.DoesNotExist:
+            return "學生不存在", 404
+        
+        # 生成學習摘要
+        learning_summary = generate_simple_learning_summary(student)
+        
+        # 基本統計
+        total_messages = Message.select().where(Message.student == student).count()
+        total_sessions = ConversationSession.select().where(ConversationSession.student == student).count()
+        active_session = student.get_active_session()
+        
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 {student.name} 的學習歷程</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+        }}
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #ecf0f1;
+        }}
+        .header h1 {{
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }}
+        .summary-content {{
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            line-height: 1.6;
+            white-space: pre-line;
+        }}
+        .stats {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }}
+        .stat-card {{
+            background: #e8f4fd;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }}
+        .stat-number {{
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #3498db;
+        }}
+        .stat-label {{
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }}
+        .btn {{
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            text-decoration: none;
+            display: inline-block;
+            margin: 10px 5px;
+            transition: background 0.3s ease;
+        }}
+        .btn:hover {{
+            background: #2980b9;
+        }}
+        .btn-secondary {{
+            background: #95a5a6;
+        }}
+        .btn-secondary:hover {{
+            background: #7f8c8d;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 {student.name} 的學習歷程</h1>
+            <p style="color: #7f8c8d;">詳細學習分析報告</p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number">{total_messages}</div>
+                <div class="stat-label">總對話數</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{total_sessions}</div>
+                <div class="stat-label">會話次數</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{'活躍' if active_session else '休息'}</div>
+                <div class="stat-label">目前狀態</div>
+            </div>
+        </div>
+        
+        <div class="summary-content">
+            {learning_summary}
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="/students" class="btn btn-secondary">← 返回學生管理</a>
+            <a href="/api/student/{student.id}/conversations" class="btn">📱 檢視對話記錄</a>
+        </div>
+    </div>
+</body>
+</html>
+        """
+        
+    except Exception as e:
+        logger.error(f"❌ 學習摘要 API 錯誤: {e}")
+        return f"學習摘要載入失敗: {str(e)}", 500
+
 @app.route('/api/stats')
-def api_stats():
-    """系統統計資料 API"""
+def get_stats():
+    """系統統計 API"""
     try:
+        # 檢查資料庫是否就緒
+        if not DATABASE_INITIALIZED or not check_database_ready():
+            return jsonify({"error": "資料庫未就緒"}), 500
+        
         # 基本統計
         total_students = Student.select().count()
         total_messages = Message.select().count()
         total_sessions = ConversationSession.select().count()
-        
-        # 記憶功能統計
         active_sessions = ConversationSession.select().where(
             ConversationSession.session_end.is_null()
         ).count()
@@ -1719,203 +2202,368 @@ def api_stats():
         # 今日統計
         today = datetime.date.today()
         today_messages = Message.select().where(
-            Message.timestamp >= today
+            Message.timestamp >= datetime.datetime.combine(today, datetime.time.min)
         ).count()
         
+        # 系統狀態
+        system_status = {
+            "database": "healthy" if DATABASE_INITIALIZED else "error",
+            "ai_service": "healthy" if model else "unavailable",
+            "line_bot": "healthy" if (line_bot_api and handler) else "unavailable"
+        }
+        
         return jsonify({
-            'overview': {
-                'total_students': total_students,
-                'total_messages': total_messages,
-                'total_sessions': total_sessions,
-                'active_sessions': active_sessions
+            "students": {
+                "total": total_students,
+                "registered_today": 0  # 可以之後實作
             },
-            'today': {
-                'messages': today_messages
+            "conversations": {
+                "total_messages": total_messages,
+                "total_sessions": total_sessions,
+                "active_sessions": active_sessions,
+                "today_messages": today_messages
             },
-            'system_status': {
-                'gemini_ai': bool(model),
-                'line_bot': bool(line_bot_api and handler),
-                'current_model': CURRENT_MODEL
-            },
-            'timestamp': datetime.datetime.now().isoformat()
+            "system": system_status,
+            "timestamp": datetime.datetime.now().isoformat()
         })
         
     except Exception as e:
-        logger.error(f"API stats error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"❌ 統計 API 錯誤: {e}")
+        return jsonify({"error": f"統計資料載入失敗: {str(e)}"}), 500
 
-@app.route('/api/conversations/<int:student_id>')
-def api_get_conversations(student_id):
-    """取得學生的對話會話資料 API"""
-    try:
-        # 檢查學生是否存在
-        try:
-            student = Student.get_by_id(student_id)
-        except Student.DoesNotExist:
-            return jsonify({'error': 'Student not found'}), 404
-        
-        # 取得學生的會話記錄
-        sessions = list(ConversationSession.select().where(
-            ConversationSession.student == student
-        ).order_by(ConversationSession.session_start.desc()).limit(10))
-        
-        session_data = []
-        for session in sessions:
-            # 取得會話中的訊息
-            messages = list(Message.select().where(
-                Message.session == session
-            ).order_by(Message.timestamp))
-            
-            session_data.append({
-                'session_id': session.id,
-                'started': session.session_start.isoformat() if session.session_start else None,
-                'ended': session.session_end.isoformat() if session.session_end else None,
-                'message_count': session.message_count,
-                'is_active': session.session_end is None,
-                'topics': session.topic_tags.split(',') if session.topic_tags else [],
-                'messages': [
-                    {
-                        'id': msg.id,
-                        'content': msg.content,
-                        'timestamp': msg.timestamp.isoformat() if msg.timestamp else None,
-                        'ai_response': msg.ai_response,
-                        'topics': msg.topic_tags.split(',') if msg.topic_tags else []
-                    } for msg in messages
-                ]
-            })
-        
-        return jsonify({
-            'student_id': student_id,
-            'student_name': student.name,
-            'total_sessions': len(session_data),
-            'sessions': session_data
-        })
-        
-    except Exception as e:
-        logger.error(f"API conversations error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-# =================== 系統工具路由 ===================
+# =================== 健康檢查端點 ===================
 @app.route('/health')
 def health_check():
     """系統健康檢查"""
     try:
-        # 基本統計
-        student_count = Student.select().count()
-        message_count = Message.select().count()
-        session_count = ConversationSession.select().count()
-        active_sessions = ConversationSession.select().where(
-            ConversationSession.session_end.is_null()
-        ).count()
+        # 資料庫檢查
+        db_status = "healthy"
+        db_details = "✅ 正常"
+        try:
+            if DATABASE_INITIALIZED and check_database_ready():
+                # 測試基本查詢
+                student_count = Student.select().count()
+                message_count = Message.select().count()
+                db_details = f"✅ 正常 (學生: {student_count}, 訊息: {message_count})"
+            else:
+                db_status = "error"
+                db_details = "❌ 未初始化或連線失敗"
+        except Exception as e:
+            db_status = "error"
+            db_details = f"❌ 錯誤: {str(e)}"
         
-        # 系統狀態
-        ai_status = "✅ 正常" if model else "❌ 未配置"
-        line_status = "✅ 正常" if (line_bot_api and handler) else "❌ 未配置"
+        # AI 服務檢查
+        ai_status = "healthy" if model and GEMINI_API_KEY else "unavailable"
+        ai_details = f"✅ Gemini {CURRENT_MODEL}" if model else "❌ 未配置或 API 金鑰無效"
         
-        # 執行會話清理
-        cleanup_result = manage_conversation_sessions()
-        cleanup_count = cleanup_result.get('cleaned_sessions', 0)
+        # LINE Bot 檢查
+        line_status = "healthy" if (line_bot_api and handler) else "unavailable"
+        line_details = "✅ 已連接" if (line_bot_api and handler) else "❌ 未配置或連線失敗"
         
-        health_html = f"""
+        # 整體健康狀態
+        overall_status = "healthy" if all([
+            db_status == "healthy",
+            ai_status in ["healthy", "unavailable"],  # AI 可以是未配置狀態
+            line_status in ["healthy", "unavailable"]  # LINE Bot 可以是未配置狀態
+        ]) else "error"
+        
+        # 記憶功能檢查（基於資料庫表格存在性）
+        memory_status = "enabled" if db_status == "healthy" else "disabled"
+        memory_details = "🧠 會話記憶功能已啟用" if memory_status == "enabled" else "❌ 記憶功能無法使用"
+        
+        # 會話管理檢查
+        session_management = "unknown"
+        session_details = "檢查中..."
+        try:
+            if db_status == "healthy":
+                active_sessions = ConversationSession.select().where(
+                    ConversationSession.session_end.is_null()
+                ).count()
+                total_sessions = ConversationSession.select().count()
+                session_management = "healthy"
+                session_details = f"✅ 正常 (活躍: {active_sessions}, 總計: {total_sessions})"
+            else:
+                session_management = "error"
+                session_details = "❌ 資料庫未就緒"
+        except Exception as e:
+            session_management = "error"
+            session_details = f"❌ 錯誤: {str(e)}"
+        
+        health_data = {
+            "status": overall_status,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "services": {
+                "database": {
+                    "status": db_status,
+                    "details": db_details
+                },
+                "ai_service": {
+                    "status": ai_status,
+                    "details": ai_details
+                },
+                "line_bot": {
+                    "status": line_status,
+                    "details": line_details
+                },
+                "memory_function": {
+                    "status": memory_status,
+                    "details": memory_details
+                },
+                "session_management": {
+                    "status": session_management,
+                    "details": session_details
+                }
+            }
+        }
+        
+        # HTML 格式的健康檢查頁面
+        status_color = {
+            "healthy": "#27ae60",
+            "error": "#e74c3c", 
+            "unavailable": "#f39c12",
+            "enabled": "#27ae60",
+            "disabled": "#e74c3c"
+        }
+        
+        services_html = ""
+        for service_name, service_info in health_data["services"].items():
+            service_display_name = {
+                "database": "💾 資料庫",
+                "ai_service": "🤖 AI 服務",
+                "line_bot": "📱 LINE Bot",
+                "memory_function": "🧠 記憶功能",
+                "session_management": "💬 會話管理"
+            }.get(service_name, service_name)
+            
+            color = status_color.get(service_info["status"], "#95a5a6")
+            
+            services_html += f"""
+            <div class="service-item">
+                <div class="service-header">
+                    <span class="service-name">{service_display_name}</span>
+                    <span class="status-badge" style="background: {color};">
+                        {service_info["status"].upper()}
+                    </span>
+                </div>
+                <div class="service-details">
+                    {service_info["details"]}
+                </div>
+            </div>
+            """
+        
+        overall_color = status_color.get(overall_status, "#95a5a6")
+        overall_icon = "✅" if overall_status == "healthy" else "⚠️" if overall_status == "warning" else "❌"
+        
+        return f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>系統健康檢查 - EMI 智能教學助理</title>
+    <title>🔍 系統健康檢查 - EMI 智能教學助理</title>
     <style>
-        body {{ font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #f8f9fa; }}
-        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 0; }}
-        .container {{ max-width: 1000px; margin: 0 auto; padding: 20px; }}
-        .page-title {{ text-align: center; font-size: 2.5em; margin-bottom: 10px; }}
-        .page-subtitle {{ text-align: center; opacity: 0.9; }}
-        .health-card {{ background: white; border-radius: 15px; padding: 25px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); margin: 20px 0; }}
-        .status-item {{ display: flex; justify-content: space-between; align-items: center; padding: 15px 0; border-bottom: 1px solid #eee; }}
-        .status-item:last-child {{ border-bottom: none; }}
-        .status-value {{ padding: 5px 10px; border-radius: 5px; font-size: 0.9em; }}
-        .status-ok {{ background: #d4edda; color: #155724; }}
-        .status-error {{ background: #f8d7da; color: #721c24; }}
-        .back-button {{ display: inline-block; padding: 10px 20px; background: rgba(255,255,255,0.2); color: white; text-decoration: none; border-radius: 5px; margin-bottom: 20px; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+        }}
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        .overall-status {{
+            background: {overall_color};
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        .overall-status h2 {{
+            margin: 0;
+            font-size: 1.5em;
+        }}
+        
+        .services-list {{
+            space-y: 15px;
+        }}
+        .service-item {{
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #3498db;
+        }}
+        .service-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }}
+        .service-name {{
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 1.1em;
+        }}
+        .status-badge {{
+            padding: 4px 12px;
+            border-radius: 15px;
+            color: white;
+            font-size: 0.8em;
+            font-weight: bold;
+        }}
+        .service-details {{
+            color: #7f8c8d;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }}
+        
+        .actions {{
+            text-align: center;
+            margin-top: 30px;
+        }}
+        .btn {{
+            display: inline-block;
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            text-decoration: none;
+            margin: 10px;
+            transition: background 0.3s ease;
+        }}
+        .btn:hover {{
+            background: #2980b9;
+        }}
+        .btn-danger {{
+            background: #e74c3c;
+        }}
+        .btn-danger:hover {{
+            background: #c0392b;
+        }}
+        .btn-secondary {{
+            background: #95a5a6;
+        }}
+        .btn-secondary:hover {{
+            background: #7f8c8d;
+        }}
+        
+        .timestamp {{
+            text-align: center;
+            color: #999;
+            font-size: 0.9em;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #ecf0f1;
+        }}
+        
+        .json-section {{
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            overflow-x: auto;
+        }}
     </style>
+    <script>
+        // 每30秒自動刷新
+        setTimeout(function() {{
+            window.location.reload();
+        }}, 30000);
+        
+        function showJSON() {{
+            document.getElementById('json-data').style.display = 
+                document.getElementById('json-data').style.display === 'none' ? 'block' : 'none';
+        }}
+    </script>
 </head>
 <body>
-    <div class="header">
-        <div class="container">
-            <a href="/" class="back-button">← 返回首頁</a>
-            <h1 class="page-title">🔍 系統健康檢查</h1>
-            <p class="page-subtitle">精簡版系統狀態監控</p>
-        </div>
-    </div>
-    
     <div class="container">
-        <div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-            ✅ 會話清理完成：清理了 {cleanup_count} 個舊會話
+        <div class="header">
+            <h1>🔍 系統健康檢查</h1>
+            <p>EMI 智能教學助理 - 服務狀態監控</p>
         </div>
         
-        <div class="health-card">
-            <h3>🔧 核心服務狀態</h3>
-            <div class="status-item">
-                <span>AI 服務 (Gemini)</span>
-                <span class="status-value {'status-ok' if model else 'status-error'}">{ai_status}</span>
-            </div>
-            <div class="status-item">
-                <span>LINE Bot 服務</span>
-                <span class="status-value {'status-ok' if (line_bot_api and handler) else 'status-error'}">{line_status}</span>
-            </div>
-            <div class="status-item">
-                <span>資料庫連線</span>
-                <span class="status-value status-ok">✅ 正常</span>
-            </div>
-            <div class="status-item">
-                <span>AI 模型</span>
-                <span class="status-value status-ok">{CURRENT_MODEL or '未配置'}</span>
-            </div>
+        <div class="overall-status">
+            <h2>{overall_icon} 系統整體狀態: {overall_status.upper()}</h2>
+            <p>上次檢查時間: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
         </div>
         
-        <div class="health-card">
-            <h3>📊 系統統計</h3>
-            <div class="status-item">
-                <span>註冊學生總數</span>
-                <span class="status-value status-ok">{student_count} 人</span>
-            </div>
-            <div class="status-item">
-                <span>對話訊息總數</span>
-                <span class="status-value status-ok">{message_count} 則</span>
-            </div>
-            <div class="status-item">
-                <span>記憶會話總數</span>
-                <span class="status-value status-ok">{session_count} 個</span>
-            </div>
-            <div class="status-item">
-                <span>活躍會話數</span>
-                <span class="status-value status-ok">{active_sessions} 個</span>
-            </div>
+        <div class="services-list">
+            {services_html}
+        </div>
+        
+        <div class="actions">
+            <a href="/" class="btn btn-secondary">🏠 返回首頁</a>
+            <a href="/students" class="btn">👥 學生管理</a>
+            <a href="/setup-database-force" class="btn btn-danger">🔧 緊急修復</a>
+            <button onclick="showJSON()" class="btn" style="background: #8e44ad;">📋 顯示 JSON</button>
+        </div>
+        
+        <div id="json-data" class="json-section" style="display: none;">
+            <pre>{json.dumps(health_data, indent=2, ensure_ascii=False)}</pre>
+        </div>
+        
+        <div class="timestamp">
+            <p>⏰ 頁面將在30秒後自動刷新</p>
+            <p>系統時區: {os.environ.get('TZ', 'UTC')} | Railway 修復版 v4.2.1</p>
         </div>
     </div>
 </body>
 </html>
         """
         
-        return health_html
-        
     except Exception as e:
-        logger.error(f"Health check error: {str(e)}")
-        return f"健康檢查錯誤: {str(e)}", 500
+        logger.error(f"❌ 健康檢查失敗: {e}")
+        return f"""
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>🚨 健康檢查失敗</title>
+    <style>
+        body {{ font-family: sans-serif; text-align: center; margin: 50px; background: #f8f9fa; }}
+        .error {{ background: #f8d7da; color: #721c24; padding: 20px; border-radius: 10px; max-width: 600px; margin: 0 auto; }}
+        .btn {{ display: inline-block; background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 10px; }}
+    </style>
+</head>
+<body>
+    <div class="error">
+        <h1>🚨 健康檢查系統失敗</h1>
+        <p><strong>錯誤詳情:</strong><br>{str(e)}</p>
+        <a href="/" class="btn">返回首頁</a>
+        <a href="/setup-database-force" class="btn" style="background: #dc3545;">緊急修復</a>
+    </div>
+</body>
+</html>
+        """, 500
 
 # =================== 錯誤處理 ===================
 @app.errorhandler(404)
-def not_found(error):
-    """404錯誤處理"""
-    return """
+def not_found_error(error):
+    """404 錯誤處理"""
+    return f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>頁面不存在 - EMI 智能教學助理</title>
+    <title>404 - 頁面不存在</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        body {{
+            font-family: sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             margin: 0;
             padding: 0;
@@ -1923,49 +2571,47 @@ def not_found(error):
             display: flex;
             align-items: center;
             justify-content: center;
-        }
-        .error-container {
+        }}
+        .error-container {{
             background: white;
             padding: 40px;
             border-radius: 15px;
             text-align: center;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             max-width: 500px;
-        }
-        .error-icon {
+        }}
+        .error-code {{
             font-size: 4em;
-            margin-bottom: 20px;
-        }
-        .error-title {
-            color: #333;
-            font-size: 1.5em;
-            margin-bottom: 20px;
-        }
-        .error-message {
-            color: #666;
-            line-height: 1.6;
-            margin-bottom: 30px;
-        }
-        .home-button {
-            display: inline-block;
-            padding: 12px 24px;
-            background: #667eea;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
             font-weight: bold;
-        }
+            color: #e74c3c;
+            margin-bottom: 20px;
+        }}
+        .btn {{
+            display: inline-block;
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            text-decoration: none;
+            margin: 10px;
+            transition: background 0.3s ease;
+        }}
+        .btn:hover {{
+            background: #2980b9;
+        }}
     </style>
 </head>
 <body>
     <div class="error-container">
-        <div class="error-icon">🔍</div>
-        <h1 class="error-title">頁面不存在</h1>
-        <p class="error-message">
-            抱歉，您要找的頁面不存在。<br>
-            可能是網址輸入錯誤，或者頁面已被移動。
-        </p>
-        <a href="/" class="home-button">返回首頁</a>
+        <div class="error-code">404</div>
+        <h2>🔍 頁面不存在</h2>
+        <p>您訪問的頁面不存在或已被移動。</p>
+        
+        <div>
+            <a href="/" class="btn">🏠 返回首頁</a>
+            <a href="/students" class="btn">👥 學生管理</a>
+            <a href="/health" class="btn">🔍 健康檢查</a>
+        </div>
     </div>
 </body>
 </html>
@@ -1973,18 +2619,18 @@ def not_found(error):
 
 @app.errorhandler(500)
 def internal_error(error):
-    """500錯誤處理"""
-    logger.error(f"Internal server error: {str(error)}")
-    return """
+    """500 錯誤處理"""
+    logger.error(f"❌ 內部伺服器錯誤: {str(error)}")
+    return f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>伺服器錯誤 - EMI 智能教學助理</title>
+    <title>500 - 伺服器錯誤</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        body {{
+            font-family: sans-serif;
             background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
             margin: 0;
             padding: 0;
@@ -1992,191 +2638,107 @@ def internal_error(error):
             display: flex;
             align-items: center;
             justify-content: center;
-        }
-        .error-container {
+        }}
+        .error-container {{
             background: white;
             padding: 40px;
             border-radius: 15px;
             text-align: center;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            max-width: 500px;
-        }
-        .error-icon {
+            max-width: 600px;
+        }}
+        .error-code {{
             font-size: 4em;
-            margin-bottom: 20px;
-        }
-        .error-title {
+            font-weight: bold;
             color: #e74c3c;
-            font-size: 1.5em;
             margin-bottom: 20px;
-        }
-        .error-message {
-            color: #666;
-            line-height: 1.6;
-            margin-bottom: 30px;
-        }
-        .home-button {
+        }}
+        .btn {{
             display: inline-block;
-            padding: 12px 24px;
             background: #3498db;
             color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
             text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-        }
+            margin: 10px;
+            transition: background 0.3s ease;
+        }}
+        .btn:hover {{
+            background: #2980b9;
+        }}
+        .btn-danger {{
+            background: #e74c3c;
+        }}
+        .btn-danger:hover {{
+            background: #c0392b;
+        }}
     </style>
 </head>
 <body>
     <div class="error-container">
-        <div class="error-icon">⚠️</div>
-        <h1 class="error-title">伺服器錯誤</h1>
-        <p class="error-message">
-            系統發生暫時性錯誤，請稍後再試。<br>
-            如果問題持續發生，請聯繫系統管理員。
-        </p>
-        <a href="/" class="home-button">返回首頁</a>
+        <div class="error-code">500</div>
+        <h2>🚨 伺服器內部錯誤</h2>
+        <p>系統發生內部錯誤，請稍後再試。</p>
+        
+        <div>
+            <a href="/" class="btn">🏠 返回首頁</a>
+            <a href="/health" class="btn">🔍 健康檢查</a>
+            <a href="/setup-database-force" class="btn btn-danger">🔧 緊急修復</a>
+        </div>
     </div>
 </body>
 </html>
     """, 500
 
-# =================== 系統啟動配置 ===================
+# =================== 應用程式啟動配置 ===================
 if __name__ == '__main__':
     try:
-        # 初始化資料庫
-        logger.info("正在初始化 EMI 智能教學助理系統（精簡版）...")
-        initialize_database()
-        
-        # 清理舊會話
-        cleanup_result = manage_conversation_sessions()
-        logger.info(f"會話清理完成: {cleanup_result}")
-        
-        # 檢查必要的環境變數
-        missing_vars = []
-        if not GEMINI_API_KEY:
-            missing_vars.append("GEMINI_API_KEY")
-        if not CHANNEL_ACCESS_TOKEN:
-            missing_vars.append("CHANNEL_ACCESS_TOKEN")
-        if not CHANNEL_SECRET:
-            missing_vars.append("CHANNEL_SECRET")
-        
-        if missing_vars:
-            logger.warning(f"缺少環境變數: {', '.join(missing_vars)}")
-            logger.warning("部分功能可能無法正常運作")
-        
-        # 啟動應用程式
-        port = int(os.environ.get('PORT', 5000))
-        debug_mode = os.environ.get('FLASK_ENV') == 'development'
-        
-        logger.info(f"✅ EMI 智能教學助理系統（精簡版）啟動成功！")
-        logger.info(f"🌐 監聽端口: {port}")
-        logger.info(f"🧠 記憶功能: {'✅ 已啟用' if True else '❌ 已停用'}")
-        logger.info(f"📚 學習歷程: {'✅ 簡化版' if True else '❌ 已停用'}")
-        logger.info(f"🔧 除錯模式: {'開啟' if debug_mode else '關閉'}")
+        # 啟動前的最終檢查
+        logger.info("🚀 啟動 EMI 智能教學助理系統...")
+        logger.info(f"📊 資料庫狀態: {'✅ 已初始化' if DATABASE_INITIALIZED else '❌ 未初始化'}")
         logger.info(f"🤖 AI 模型: {CURRENT_MODEL or '未配置'}")
+        logger.info(f"📱 LINE Bot: {'✅ 已配置' if (line_bot_api and handler) else '❌ 未配置'}")
         
-        if debug_mode:
-            logger.info("=" * 50)
-            logger.info("🔍 除錯資訊:")
-            logger.info(f"   - 健康檢查: http://localhost:{port}/health")
-            logger.info(f"   - 資料匯出: http://localhost:{port}/export")
-            logger.info(f"   - API狀態: http://localhost:{port}/api/stats")
-            logger.info("=" * 50)
+        # 執行會話清理
+        cleanup_result = manage_conversation_sessions()
+        logger.info(f"🧹 啟動時會話清理: 清理了 {cleanup_result.get('cleaned_sessions', 0)} 個舊會話")
         
-        # 啟動 Flask 應用程式
+        # 啟動 Flask 應用
+        port = int(os.environ.get('PORT', 5000))
         app.run(
             host='0.0.0.0',
             port=port,
-            debug=debug_mode,
-            threaded=True
+            debug=os.environ.get('FLASK_ENV') == 'development'
         )
         
     except Exception as e:
-        logger.error(f"❌ 系統啟動失敗: {str(e)}")
+        logger.error(f"❌ 應用程式啟動失敗: {e}")
         raise
 
-# =================== 版本說明 ===================
-"""
-EMI 智能教學助理系統 - 精簡修復版 v4.2.0
-更新日期: 2025年6月29日
+# =================== Railway 部署專用啟動點 ===================
+# Railway 使用 Gunicorn 啟動，所以上面的 if __name__ == '__main__' 不會執行
+# 但資料庫初始化已經在模組載入時完成，這裡只需要確保 app 對象可用
 
-🎯 **根據用戶需求修改:**
+# 確保在 Gunicorn 環境下也能正確初始化
+if not DATABASE_INITIALIZED:
+    logger.warning("⚠️ Gunicorn 環境下資料庫未初始化，嘗試緊急初始化...")
+    try:
+        force_initialize_database()
+        logger.info("✅ Gunicorn 環境下緊急初始化成功")
+    except Exception as e:
+        logger.error(f"❌ Gunicorn 環境下緊急初始化失敗: {e}")
 
-✅ **保留功能:**
-✅ 記憶功能系統 - ConversationSession、會話追蹤、上下文記憶
-✅ API 端點 - 所有 API 功能完整保留
-✅ 學生註冊系統 - 完整的3步驟註冊流程
-✅ 基本對話功能 - LINE Bot + Gemini AI
+# 輸出最終狀態
+logger.info("=" * 60)
+logger.info("🎓 EMI 智能教學助理系統 - Railway 修復版 v4.2.1")
+logger.info(f"📊 資料庫: {'✅ 就緒' if DATABASE_INITIALIZED else '❌ 未就緒'}")
+logger.info(f"🤖 AI: {'✅ 就緒' if model else '❌ 未配置'}")
+logger.info(f"📱 LINE: {'✅ 就緒' if (line_bot_api and handler) else '❌ 未配置'}")
+logger.info(f"🧠 記憶功能: {'✅ 已啟用' if DATABASE_INITIALIZED else '❌ 無法使用'}")
+logger.info("🚀 系統準備就緒，等待請求...")
+logger.info("=" * 60)
 
-🔄 **簡化功能:**
-🔄 學習歷程生成 - 移除複雜AI分析 → 簡單對話摘要
-🔄 資料匯出 - 只保留TSV格式，移除複雜分析報告
-🔄 學生統計頁面 - 簡化為基本列表，移除複雜統計
-
-❌ **移除功能:**
-❌ 會話管理控制台 - 移除 /admin/sessions
-❌ 複雜HTML模板 - 簡化所有頁面生成
-❌ 巢狀 f-string - 完全修復語法錯誤
-
-🔧 **語法修復:**
-✅ 所有巢狀 f-string 已重構為分離式生成
-✅ HTML 內容先生成到變數，再組合到最終模板
-✅ 簡化資料庫查詢，避免複雜操作
-✅ 確保語法正確性和運行穩定性
-
-📦 **檔案大小比較:**
-- 原版: 5000+ 行，8個部分
-- 精簡版: 約 1500 行，3個部分
-
-🚀 **部署優勢:**
-• 更快的啟動時間
-• 更低的記憶體使用
-• 更容易除錯和維護
-• 語法錯誤已完全修復
-• 保留核心記憶功能
-
-💡 **主要改進:**
-1. 修復所有導致 Gemini 無法回應的語法錯誤
-2. 保留用戶重視的記憶功能和 API
-3. 簡化複雜功能但保持實用性
-4. 提高系統穩定性和可維護性
-
-🔄 **向後相容性:**
-• 所有重要路由保持不變
-• 資料庫結構完全相容
-• API 接口完全保留
-• 環境變數需求不變
-
-📁 **檔案結構:**
-- 第1段 (1-750行): 基本配置、資料庫模型、AI回應生成、註冊處理、LINE Bot處理
-- 第2段 (751-1500行): 學習歷程生成、系統首頁、學生管理頁面、學生詳細頁面
-- 第3段 (1501-結束): 學習摘要、資料匯出、API端點、系統工具、錯誤處理、啟動配置
-
-🔗 **串接說明:**
-- 第1段：包含所有基礎功能和依賴
-- 第2段：接續第1段，添加頁面路由和管理功能
-- 第3段：完成所有剩餘功能，包含完整的錯誤處理和啟動邏輯
-
-📋 **部署步驟:**
-1. 將三段代碼按順序合併為完整的 app.py
-2. 確保所有環境變數正確設定
-3. 上傳到 Railway 並部署
-4. 檢查 /health 確認系統正常運作
-5. 測試 LINE Bot 對話功能
-
-⚠️ **重要提醒:**
-- 確保將三段代碼完整合併，不可遺漏任何部分
-- 第1段的結束標記和第2段的開始要正確銜接
-- 所有 import 語句都在第1段，後續段落不需要重複
-- 資料庫模型定義在第1段，後續段落直接使用
-"""
-
-# =================== 第3段結束標記 ===================
-# 🔸 第3段結束 - 完整檔案結束
-# 
-# 📋 **合併指南:**
-# 1. 將第1段完整複製（去除結束標記）
-# 2. 接著複製第2段內容（去除開始和結束標記） 
-# 3. 最後複製第3段內容（去除開始標記）
-# 4. 確保沒有重複的 import 或 class 定義
-# 5. 檢查所有函數和路由都完整包含
+# =================== 檔案結束標記 ===================
+# 🎯 第3段完成 - 這是 app.py 的最後一段
+# 功能包含：學生管理、API端點、健康檢查、錯誤處理、啟動配置
+# 修復版本：專門解決 Railway 部署時的資料庫初始化問題
