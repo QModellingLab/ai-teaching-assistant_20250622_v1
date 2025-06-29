@@ -1,4 +1,4 @@
-# =================== app.py 簡化版 - 第1段開始 ===================
+# =================== app.py 優化版 - 第1段開始 ===================
 # 基本導入和配置
 
 import os
@@ -100,182 +100,169 @@ def get_best_available_model():
 
 CURRENT_MODEL = get_best_available_model()
 
-# =================== 快取系統配置 ===================
+# =================== 學生註冊機制（優化版）===================
 
-# 回應快取系統
-response_cache = {}
-RESPONSE_CACHE_DURATION = 300  # 5分鐘快取
-
-def get_cached_response(user_id, message_content):
-    """檢查快取回應"""
-    cache_key = f"{user_id}:{hash(message_content)}"
-    if cache_key in response_cache:
-        cached_data = response_cache[cache_key]
-        if time.time() - cached_data['timestamp'] < RESPONSE_CACHE_DURATION:
-            logger.info("💾 使用快取回應")
-            return cached_data['response']
-    return None
-
-def cache_response(user_id, message_content, response):
-    """快取回應"""
-    cache_key = f"{user_id}:{hash(message_content)}"
-    response_cache[cache_key] = {
-        'response': response,
-        'timestamp': time.time()
-    }
-
-def cleanup_response_cache():
-    """清理過期快取"""
-    current_time = time.time()
-    expired_keys = [key for key, data in response_cache.items() 
-                   if current_time - data['timestamp'] > RESPONSE_CACHE_DURATION]
-    
-    for key in expired_keys:
-        del response_cache[key]
-    
-    if expired_keys:
-        logger.info(f"🧹 清理了 {len(expired_keys)} 個過期快取")
-
-# 啟動快取清理定時器
-def start_cache_cleanup_timer():
-    """啟動快取清理定時器"""
-    def cleanup_loop():
-        while True:
-            time.sleep(600)  # 每10分鐘清理一次
-            cleanup_response_cache()
-    
-    cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
-    cleanup_thread.start()
-    logger.info("🚀 快取清理定時器已啟動")
-
-start_cache_cleanup_timer()
-
-# =================== 學生註冊機制 ===================
-
-def handle_new_student_registration(line_user_id, message_text, display_name):
-    """處理新學生註冊流程"""
+def handle_student_registration(line_user_id, message_text, display_name=""):
+    """優化的註冊流程：學號 → 姓名 → 確認"""
     from models import Student
     
-    # 檢查是否為新用戶或正在註冊中的用戶
     student = Student.get_or_none(Student.line_user_id == line_user_id)
     
+    # === 步驟 1: 新用戶，詢問學號 ===
     if not student:
-        # 創建新學生記錄，狀態為「等待姓名」
         student = Student.create(
-            name="",  # 待填入
+            name="",
             line_user_id=line_user_id,
-            student_id="",  # 待填入  
-            registration_step=1,  # 註冊步驟：1=等待姓名
+            student_id="",
+            registration_step=1,  # 等待學號
             created_at=datetime.datetime.now(),
             last_active=datetime.datetime.now()
         )
         
-        # 發送歡迎訊息和姓名詢問
-        welcome_message = """🎓 Welcome to EMI AI Teaching Assistant!
+        return """🎓 Welcome to EMI AI Teaching Assistant!
 
 I'm your AI learning partner for the course "Practical Applications of AI in Life and Learning."
 
-First-time registration:
-Please tell me your **name**? 
-(您的姓名是？)"""
-        
-        return welcome_message
-    
-    # 處理註冊流程
-    elif hasattr(student, 'registration_step') and student.registration_step == 1:  # 等待姓名
-        student.name = message_text.strip()
-        student.registration_step = 2
-        student.save()
-        
-        return f"""Nice to meet you, {student.name}! 😊
+**Step 1/3:** Please provide your **Student ID**
+(請提供您的學號)
 
-Next, please provide your **Student ID**?
-(請提供您的學號？)
+Format: A1234567
 Example: A1234567"""
     
-    elif hasattr(student, 'registration_step') and student.registration_step == 2:  # 等待學號
-        student.student_id = message_text.strip()
-        student.registration_step = 0  # 註冊完成
-        student.save()
+    # === 步驟 2: 收到學號，詢問姓名 ===
+    elif student.registration_step == 1:
+        student_id = message_text.strip().upper()
         
-        return f"""✅ Registration completed!
+        # 簡單驗證學號格式
+        if len(student_id) >= 6 and student_id[0].isalpha():
+            student.student_id = student_id
+            student.registration_step = 2  # 等待姓名
+            student.save()
+            
+            return f"""✅ Student ID received: {student_id}
 
-📋 Your information:
-• Name: {student.name}
-• Student ID: {student.student_id}
+**Step 2/3:** Please tell me your **name**
+(請告訴我您的姓名)
 
-Now you can start asking questions! Feel free to ask me anything about your studies 😊
+Example: John Smith / 王小明"""
+        else:
+            return """❌ Invalid format. Please provide a valid Student ID.
+
+Format: A1234567 (Letter + Numbers)
+Example: A1234567"""
+    
+    # === 步驟 3: 收到姓名，最終確認 ===
+    elif student.registration_step == 2:
+        name = message_text.strip()
+        
+        if len(name) >= 2:  # 基本驗證
+            student.name = name
+            student.registration_step = 3  # 等待確認
+            student.save()
+            
+            return f"""**Step 3/3:** Please confirm your information:
+
+📋 **Your Information:**
+• **Name:** {name}
+• **Student ID:** {student.student_id}
+
+Reply with:
+• **"YES"** to confirm and complete registration
+• **"NO"** to start over
+
+(回覆 YES 確認，或 NO 重新填寫)"""
+        else:
+            return """❌ Please provide a valid name (at least 2 characters).
+
+Example: John Smith / 王小明"""
+    
+    # === 步驟 4: 處理確認回應 ===
+    elif student.registration_step == 3:
+        response = message_text.strip().upper()
+        
+        if response in ['YES', 'Y', '是', '確認', 'CONFIRM']:
+            student.registration_step = 0  # 註冊完成
+            student.save()
+            
+            return f"""🎉 Registration completed successfully!
+
+📋 **Welcome, {student.name}!**
+• **Student ID:** {student.student_id}
+• **Registration Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+🚀 **You can now start learning!**
 
 I can help you with:
-📚 Academic questions
-🔤 English learning
-💡 Course content
-🎯 Study guidance
+📚 **Academic questions** - Course content and concepts
+🔤 **English learning** - Grammar, vocabulary, pronunciation  
+💡 **Study guidance** - Learning strategies and tips
+🎯 **Course discussions** - AI applications in life and learning
 
-Just type your question and I'll help you! ⚡"""
+**Just ask me anything!** 😊
+Example: "What is machine learning?" or "Help me with English grammar"."""
+            
+        elif response in ['NO', 'N', '否', '重新', 'RESTART']:
+            # 重新開始註冊
+            student.registration_step = 1
+            student.name = ""
+            student.student_id = ""
+            student.save()
+            
+            return """🔄 **Restarting registration...**
+
+**Step 1/3:** Please provide your **Student ID**
+(請提供您的學號)
+
+Format: A1234567
+Example: A1234567"""
+        else:
+            return f"""❓ Please reply with **YES** or **NO**:
+
+📋 **Your Information:**
+• **Name:** {student.name}
+• **Student ID:** {student.student_id}
+
+Reply with:
+• **"YES"** to confirm ✅
+• **"NO"** to restart ❌"""
     
-    else:
-        # 註冊已完成，返回None讓系統處理正常對話
-        return None
+    # 註冊已完成
+    return None
 
-# =================== AI回應生成 ===================
+# =================== AI回應生成（簡化，移除快取）===================
 
-def generate_simple_ai_response(message, student):
-    """生成簡化的AI回應（150字英文限制）"""
+def generate_ai_response(message_text, student):
+    """生成AI回應（移除快取機制）"""
     try:
         if not GEMINI_API_KEY or not CURRENT_MODEL:
-            return "Sorry, AI service is temporarily unavailable. Please try again later!"
+            return "AI service is currently unavailable. Please try again later."
         
-        # 檢查快取
-        cached = get_cached_response(student.line_user_id, message)
-        if cached:
-            return cached
-        
-        # EMI課程簡潔AI提示詞
-        prompt = f"""You are an academic AI assistant for EMI course: "Practical Applications of AI in Life and Learning"
+        # 建構提示詞
+        prompt = f"""You are an EMI (English as a Medium of Instruction) teaching assistant for the course "Practical Applications of AI in Life and Learning."
 
-STRICT RULES:
-1. Maximum 150 words total
-2. Structure: **Term**: technical definition. Example: specific real application.
-3. NO greetings, questions, or filler words
-4. Use bold for key concepts: **term**
-5. One concrete example with company/data
+Student: {student.name} (ID: {student.student_id})
+Question: {message_text}
 
-Student question: {message}
-Course topic: AI applications in daily life
+Please provide a helpful, academic response in English (150 words max). Focus on:
+- Clear, educational explanations
+- Practical examples when relevant  
+- Encouraging tone for learning
+- Academic language appropriate for university students
 
-Respond with academic precision and brevity."""
+Response:"""
 
-        # 調用AI
+        # 調用 Gemini API
         model = genai.GenerativeModel(CURRENT_MODEL)
-        generation_config = genai.types.GenerationConfig(
-            temperature=0.7,
-            top_p=0.8,
-            top_k=20,
-            max_output_tokens=200  # 限制輸出長度
-        )
+        response = model.generate_content(prompt)
         
-        response = model.generate_content(prompt, generation_config=generation_config)
-        ai_response = response.text if response.text else "I'm here to help with your studies! Could you please rephrase your question?"
-        
-        # 快取回應
-        cache_response(student.line_user_id, message, ai_response)
-        
-        logger.info(f"✅ AI 回應生成成功 - 學生: {student.name}")
-        return ai_response
+        return response.text if response.text else "I'm sorry, I couldn't generate a proper response. Could you please rephrase your question?"
         
     except Exception as e:
         logger.error(f"❌ AI 回應生成錯誤: {e}")
-        fallback_responses = [
-            "I'm having some technical difficulties. Please try again!",
-            "System is processing. Please ask me again in a moment!",
-            "Sorry, I encountered an issue. Please rephrase your question!"
-        ]
-        import random
-        return random.choice(fallback_responses)
+        return "Sorry, I encountered an issue. Please rephrase your question!"
 
-def generate_simple_learning_suggestion(student):
-    """生成簡化版個人學習建議（150字英文）"""
+def generate_learning_suggestion(student):
+    """生成學習建議（簡化版）"""
     from models import Message
     
     try:
@@ -301,13 +288,12 @@ Recent topics:
 
 Provide:
 1. Learning strengths (1-2 sentences)
-2. Areas for improvement (1-2 sentences)
+2. Areas for improvement (1-2 sentences)  
 3. Specific recommendations (1-2 sentences)
 
 Keep it encouraging and practical. Use simple vocabulary."""
 
         if not GEMINI_API_KEY or not CURRENT_MODEL:
-            # 備用建議
             return get_fallback_suggestion(student, len(messages))
         
         model = genai.GenerativeModel(CURRENT_MODEL)
@@ -345,6 +331,134 @@ You have {message_count} conversation records in {days_since_creation} days, sho
 
 🔹 **Tip**: Regularly review previous discussions and try applying what you've learned in real situations to deepen understanding!"""
 
+# =================== app.py 優化版 - 第1段結束 ===================
+
+# =================== app.py 優化版 - 第2段開始 ===================
+# LINE Bot Webhook 和訊息處理（同步流程）
+
+@app.route('/callback', methods=['POST'])
+def callback():
+    """LINE Bot Webhook 回調處理"""
+    if not (line_bot_api and handler):
+        logger.error("❌ LINE Bot 未正確配置")
+        abort(500)
+    
+    # 取得請求標頭中的 X-Line-Signature
+    signature = request.headers.get('X-Line-Signature', '')
+    
+    # 取得請求內容
+    body = request.get_data(as_text=True)
+    logger.info(f"📥 收到 Webhook 請求")
+    
+    # 驗證請求
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        logger.error("❌ 無效的 LINE Signature")
+        abort(400)
+    except Exception as e:
+        logger.error(f"❌ Webhook 處理錯誤: {e}")
+        abort(500)
+    
+    return 'OK'
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    """優化的訊息處理流程（同步處理）"""
+    logger.info(f"📱 收到 LINE 訊息: {event.message.text[:50]}...")
+    
+    try:
+        from models import Student, Message
+        
+        # === 1. 獲取用戶資訊 ===
+        user_id = event.source.user_id
+        message_text = event.message.text.strip()
+        
+        # 取得用戶資料
+        try:
+            profile = line_bot_api.get_profile(user_id)
+            display_name = profile.display_name
+            logger.info(f"👤 用戶: {display_name} ({user_id[:10]}...)")
+        except Exception as e:
+            logger.warning(f"⚠️ 無法取得用戶資料: {e}")
+            display_name = f"用戶_{user_id[:8]}"
+        
+        # === 2. 處理註冊流程 ===
+        registration_response = handle_student_registration(user_id, message_text, display_name)
+        if registration_response:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=registration_response)
+            )
+            return
+        
+        # === 3. 取得已註冊學生 ===
+        student = Student.get_or_none(Student.line_user_id == user_id)
+        if not student or student.registration_step != 0:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="Please complete registration first.")
+            )
+            return
+        
+        # === 4. 記錄學生訊息到資料庫 ===
+        student_message = Message.create(
+            student=student,
+            content=message_text,
+            timestamp=datetime.datetime.now(),
+            source_type='student'
+        )
+        logger.info(f"💾 學生訊息已記錄: ID {student_message.id}")
+        
+        # === 5. 生成 AI 回應 ===
+        start_time = time.time()
+        ai_response_text = generate_ai_response(message_text, student)
+        response_time = time.time() - start_time
+        logger.info(f"🤖 AI 回應生成完成，耗時: {response_time:.2f}秒")
+        
+        # === 6. 記錄 AI 回應到資料庫 ===
+        ai_message = Message.create(
+            student=student,
+            content=ai_response_text,
+            timestamp=datetime.datetime.now(),
+            source_type='ai'
+        )
+        logger.info(f"💾 AI 回應已記錄: ID {ai_message.id}")
+        
+        # === 7. 發送回應給學生 ===
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=ai_response_text)
+        )
+        
+        # === 8. 更新學生活動記錄 ===
+        student.last_active = datetime.datetime.now()
+        if hasattr(student, 'message_count'):
+            student.message_count = (student.message_count or 0) + 1
+        student.save()
+        
+        logger.info(f"✅ 訊息處理完成 - 學生: {student.name}")
+        
+    except LineBotApiError as e:
+        logger.error(f"❌ LINE Bot API 錯誤: {e}")
+        try:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="Sorry, I'm having some technical difficulties. Please try again! 🔧")
+            )
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"❌ 訊息處理錯誤: {e}")
+        try:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="I encountered an issue. Please try again! 🤔")
+            )
+        except:
+            pass
+
 # =================== 系統路由 ===================
 
 @app.route('/')
@@ -375,9 +489,6 @@ def index():
             ).count()
         except:
             today_messages = 0
-        
-        # 快取統計
-        cache_count = len(response_cache)
         
         # 系統狀態
         ai_status = "✅ 正常" if GEMINI_API_KEY else "❌ 未配置"
@@ -420,7 +531,7 @@ def index():
             font-size: 1.1em;
         }}
         
-        /* 簡化統計卡片 */
+        /* 統計卡片 */
         .stats-simple {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -502,47 +613,6 @@ def index():
         .btn-success:hover {{ background: #219a52; }}
         .btn-orange {{ background: #f39c12; }}
         .btn-orange:hover {{ background: #d68910; }}
-        
-        /* 快取詳情彈窗 */
-        .modal {{
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
-        }}
-        .modal-content {{
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 30px;
-            border-radius: 15px;
-            max-width: 500px;
-            width: 90%;
-        }}
-        .modal-header {{
-            margin-bottom: 20px;
-        }}
-        .modal-body {{
-            margin-bottom: 20px;
-        }}
-        .modal-footer {{
-            text-align: right;
-        }}
-        .btn-modal {{
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-left: 10px;
-        }}
-        .btn-danger {{ background: #e74c3c; color: white; }}
-        .btn-secondary {{ background: #95a5a6; color: white; }}
     </style>
 </head>
 <body>
@@ -550,7 +620,7 @@ def index():
         <!-- 系統標題 -->
         <div class="header">
             <h1>🎓 EMI 智能教學助理系統</h1>
-            <p>Practical Applications of AI in Life and Learning</p>
+            <p>Practical Applications of AI in Life and Learning - 優化版</p>
         </div>
         
         <!-- 簡化統計 -->
@@ -577,7 +647,7 @@ def index():
         <div class="system-status">
             <h3 style="color: #2c3e50; margin-bottom: 15px;">⚙️ 系統狀態</h3>
             <div class="status-item">
-                <span>🤖 AI服務 (gemini-2.5-flash)</span>
+                <span>🤖 AI服務 ({CURRENT_MODEL})</span>
                 <span class="status-ok">{ai_status}</span>
             </div>
             <div class="status-item">
@@ -585,12 +655,12 @@ def index():
                 <span class="status-ok">{line_status}</span>
             </div>
             <div class="status-item">
-                <span>💾 快取項目</span>
-                <span style="color: #2c3e50;">{cache_count} <button onclick="showCacheDetails()" style="margin-left: 10px; padding: 2px 8px; border: none; background: #3498db; color: white; border-radius: 4px; cursor: pointer;">📋 詳情</button></span>
+                <span>⚡ 回應模式</span>
+                <span style="color: #2c3e50;">同步處理 (移除快取)</span>
             </div>
             <div class="status-item">
-                <span>⚡ 回應模式</span>
-                <span style="color: #2c3e50;">學術簡潔 (150字)</span>
+                <span>📝 註冊流程</span>
+                <span style="color: #2c3e50;">學號→姓名→確認</span>
             </div>
         </div>
         
@@ -621,60 +691,6 @@ def index():
             </div>
         </div>
     </div>
-
-    <!-- 快取詳情彈窗 -->
-    <div id="cacheModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>💾 快取詳細資料</h3>
-            </div>
-            <div class="modal-body">
-                <p><strong>總數量:</strong> {cache_count} 個項目</p>
-                <p><strong>有效期:</strong> 5分鐘</p>
-                <p><strong>命中率:</strong> 85%</p>
-                <p><strong>節省時間:</strong> 約45秒</p>
-                
-                <h4>📋 最近快取項目:</h4>
-                <ul style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                    <li>user123: "what is AI?" (2分鐘前)</li>
-                    <li>user456: "machine learning?" (4分鐘前)</li>
-                    <li>user789: "hello" (5分鐘前)</li>
-                </ul>
-            </div>
-            <div class="modal-footer">
-                <button onclick="clearCache()" class="btn-modal btn-danger">🧹 清除快取</button>
-                <button onclick="closeCacheModal()" class="btn-modal btn-secondary">❌ 關閉</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        function showCacheDetails() {{
-            document.getElementById('cacheModal').style.display = 'block';
-        }}
-        
-        function closeCacheModal() {{
-            document.getElementById('cacheModal').style.display = 'none';
-        }}
-        
-        function clearCache() {{
-            if (confirm('確定要清除所有快取嗎？')) {{
-                fetch('/api/clear-cache', {{method: 'POST'}})
-                    .then(() => {{
-                        alert('快取已清除！');
-                        location.reload();
-                    }})
-                    .catch(() => alert('清除失敗'));
-            }}
-        }}
-        
-        // 點擊彈窗外部關閉
-        document.getElementById('cacheModal').onclick = function(e) {{
-            if (e.target === this) {{
-                closeCacheModal();
-            }}
-        }}
-    </script>
 </body>
 </html>
         """
@@ -691,134 +707,10 @@ def index():
         </div>
         """
 
-# =================== app.py 簡化版 - 第1段結束 ===================
+# =================== app.py 優化版 - 第2段結束 ===================
 
-# =================== app.py 簡化版 - 第2段開始 ===================
-# LINE Bot Webhook 和訊息處理
-
-@app.route('/callback', methods=['POST'])
-def callback():
-    """LINE Bot Webhook 回調處理"""
-    if not (line_bot_api and handler):
-        logger.error("❌ LINE Bot 未正確配置")
-        abort(500)
-    
-    # 取得請求標頭中的 X-Line-Signature
-    signature = request.headers.get('X-Line-Signature', '')
-    
-    # 取得請求內容
-    body = request.get_data(as_text=True)
-    logger.info(f"📥 收到 Webhook 請求")
-    
-    # 驗證請求
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        logger.error("❌ 無效的 LINE Signature")
-        abort(400)
-    except Exception as e:
-        logger.error(f"❌ Webhook 處理錯誤: {e}")
-        abort(500)
-    
-    return 'OK'
-
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    """簡化的訊息處理 - 支援首次註冊詢問"""
-    logger.info(f"📱 收到 LINE 訊息: {event.message.text[:50]}...")
-    
-    try:
-        from models import Student, Message
-        
-        # 獲取用戶資訊
-        user_id = event.source.user_id
-        message_text = event.message.text.strip()
-        
-        # 取得用戶資料
-        try:
-            profile = line_bot_api.get_profile(user_id)
-            display_name = profile.display_name
-            logger.info(f"👤 用戶: {display_name} ({user_id[:10]}...)")
-        except Exception as e:
-            logger.warning(f"⚠️ 無法取得用戶資料: {e}")
-            display_name = f"用戶_{user_id[:8]}"
-        
-        # 檢查是否為新用戶或註冊流程
-        registration_response = handle_new_student_registration(user_id, message_text, display_name)
-        
-        if registration_response:
-            # 正在註冊流程中，發送註冊相關回應
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=registration_response)
-            )
-            return
-        
-        # 註冊完成，處理正常對話
-        student = Student.get_or_none(Student.line_user_id == user_id)
-        if not student:
-            # 理論上不應該發生，但加個保護
-            logger.error(f"❌ 找不到學生記錄: {user_id}")
-            return
-        
-        # 更新學生活動記錄
-        student.last_active = datetime.datetime.now()
-        if hasattr(student, 'message_count'):
-            student.message_count += 1
-        student.save()
-        
-        # 記錄學生訊息 (簡化版，只記錄對話數量)
-        Message.create(
-            student=student,
-            content=message_text,
-            timestamp=datetime.datetime.now(),
-            source_type='line'
-        )
-        
-        logger.info(f"💾 學生訊息已儲存")
-        
-        # 生成AI回應
-        ai_response = generate_simple_ai_response(message_text, student)
-        
-        # 發送回應
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=ai_response)
-        )
-        
-        # 儲存AI回應記錄
-        Message.create(
-            student=student,
-            content=ai_response,
-            timestamp=datetime.datetime.now(),
-            source_type='ai'
-        )
-        
-        logger.info(f"✅ 訊息處理完成 - 學生: {student.name}")
-        
-    except LineBotApiError as e:
-        logger.error(f"❌ LINE Bot API 錯誤: {e}")
-        try:
-            error_message = "Sorry, I'm having some technical difficulties. Please try again! 🔧"
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=error_message)
-            )
-        except:
-            pass
-            
-    except Exception as e:
-        logger.error(f"❌ 訊息處理錯誤: {e}")
-        try:
-            error_message = "I encountered an issue. Please try again! 🤔"
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=error_message)
-            )
-        except:
-            pass
-
-# =================== 學生管理路由 ===================
+# =================== app.py 優化版 - 第3段開始 ===================
+# 學生管理路由
 
 @app.route('/students')
 def students_list():
@@ -874,7 +766,7 @@ def students_list():
     <div class="header">
         <div class="container">
             <h1 class="page-title">👥 學生管理系統</h1>
-            <p class="page-subtitle">簡化版學生清單和統計</p>
+            <p class="page-subtitle">優化版學生清單和統計</p>
         </div>
     </div>
     
@@ -960,7 +852,7 @@ def students_list():
                 <div style="font-size: 4em; margin-bottom: 20px;">👥</div>
                 <h3>還沒有註冊的學生</h3>
                 <p>當學生首次使用 LINE Bot 時，系統會自動引導註冊流程。</p>
-                <p><strong>✨ 新功能：</strong>自動詢問姓名和學號，AI回應簡潔精準！</p>
+                <p><strong>✨ 優化功能：</strong>學號→姓名→確認，三步驟完成註冊！</p>
             </div>"""
         
         students_page += """
@@ -1064,7 +956,7 @@ def student_detail(student_id):
     
     <div class="container">
         <div class="content-section">
-            <div class="section-title">📊 簡化統計</div>
+            <div class="section-title">📊 基本統計</div>
             <div class="stats-simple">
                 <div class="stat-item">
                     <div class="stat-number">{total_messages}</div>
@@ -1088,13 +980,13 @@ def student_detail(student_id):
         
         if messages:
             for message in messages:
-                msg_type_icon = "👤" if message.source_type == 'line' else "🤖"
+                msg_type_icon = "👤" if message.source_type in ['line', 'student'] else "🤖"
                 msg_time = message.timestamp.strftime('%m月%d日 %H:%M') if message.timestamp else '未知時間'
                 
                 detail_html += f"""
                     <div class="message-item">
                         <div class="message-meta">
-                            {msg_type_icon} {msg_time} • {'學生' if message.source_type == 'line' else 'AI助理'}
+                            {msg_type_icon} {msg_time} • {'學生' if message.source_type in ['line', 'student'] else 'AI助理'}
                         </div>
                         <div class="message-content">{message.content[:300]}{'...' if len(message.content) > 300 else ''}</div>
                     </div>
@@ -1129,14 +1021,14 @@ def student_detail(student_id):
         </div>
         """
 
-# =================== app.py 簡化版 - 第2段結束 ===================
+# =================== app.py 優化版 - 第3段結束 ===================
 
-# =================== app.py 簡化版 - 第3段開始 ===================
+# =================== app.py 優化版 - 第4段開始 ===================
 # 學習建議和系統工具路由
 
 @app.route('/students/<int:student_id>/summary')
 def student_summary(student_id):
-    """學生學習建議頁面（簡化版）"""
+    """學生學習建議頁面（優化版）"""
     try:
         logger.info(f"📊 載入學生 {student_id} 的學習建議...")
         
@@ -1166,9 +1058,9 @@ def student_summary(student_id):
             learning_days = 0
 
         # 生成學習建議
-        ai_suggestion = generate_simple_learning_suggestion(student)
+        ai_suggestion = generate_learning_suggestion(student)
 
-        # 生成建議頁面HTML（簡化版）
+        # 生成建議頁面HTML（優化版）
         summary_html = f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -1245,16 +1137,20 @@ def health_check():
         student_count = Student.select().count()
         message_count = Message.select().count()
         
+        # 檢查註冊狀態
+        try:
+            need_registration = Student.select().where(Student.registration_step > 0).count()
+            completed_registration = Student.select().where(Student.registration_step == 0).count()
+        except:
+            need_registration = 0
+            completed_registration = student_count
+        
         # 檢查 AI 服務
         ai_status = "✅ 正常" if GEMINI_API_KEY else "❌ API金鑰未設定"
         current_model = CURRENT_MODEL or "未配置"
         
         # 檢查 LINE Bot
         line_status = "✅ 正常" if (CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET) else "❌ 憑證未設定"
-        
-        # 檢查快取系統
-        cache_count = len(response_cache)
-        cache_status = f"✅ 正常 ({cache_count} 項目)"
         
         health_html = f"""
 <!DOCTYPE html>
@@ -1277,6 +1173,7 @@ def health_check():
         .status-ok {{ background: #d4edda; color: #155724; }}
         .status-error {{ background: #f8d7da; color: #721c24; }}
         .status-info {{ background: #d1ecf1; color: #0c5460; }}
+        .status-warning {{ background: #fff3cd; color: #856404; }}
         .back-button {{ display: inline-block; padding: 10px 20px; background: rgba(255,255,255,0.2); color: white; text-decoration: none; border-radius: 5px; margin-bottom: 20px; }}
         .back-button:hover {{ background: rgba(255,255,255,0.3); }}
         .refresh-btn {{ background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }}
@@ -1288,7 +1185,7 @@ def health_check():
         <div class="container">
             <a href="/" class="back-button">← 返回首頁</a>
             <h1 class="page-title">🔍 系統健康檢查</h1>
-            <p class="page-subtitle">簡化版系統狀態監控</p>
+            <p class="page-subtitle">優化版系統狀態監控</p>
         </div>
     </div>
     
@@ -1308,17 +1205,13 @@ def health_check():
                 <span class="status-value status-ok">✅ 正常</span>
             </div>
             <div class="status-item">
-                <span class="status-label">快取系統</span>
-                <span class="status-value status-info">{cache_status}</span>
-            </div>
-            <div class="status-item">
                 <span class="status-label">當前 AI 模型</span>
                 <span class="status-value status-ok">{current_model}</span>
             </div>
         </div>
         
         <div class="health-card">
-            <h3>📊 簡化統計</h3>
+            <h3>📊 資料統計</h3>
             <div class="status-item">
                 <span class="status-label">註冊學生數量</span>
                 <span class="status-value status-ok">{student_count}</span>
@@ -1328,32 +1221,36 @@ def health_check():
                 <span class="status-value status-ok">{message_count}</span>
             </div>
             <div class="status-item">
-                <span class="status-label">快取項目數量</span>
-                <span class="status-value status-info">{cache_count}</span>
+                <span class="status-label">完成註冊</span>
+                <span class="status-value status-ok">{completed_registration}</span>
             </div>
             <div class="status-item">
-                <span class="status-label">最後檢查時間</span>
-                <span class="status-value status-ok">{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</span>
+                <span class="status-label">待完成註冊</span>
+                <span class="status-value {'status-warning' if need_registration > 0 else 'status-ok'}">{need_registration}</span>
             </div>
         </div>
         
         <div class="health-card">
-            <h3>✨ 簡化功能特色</h3>
+            <h3>✨ 優化功能特色</h3>
             <div class="status-item">
-                <span class="status-label">首次註冊詢問</span>
-                <span class="status-value status-ok">✅ 已啟用</span>
+                <span class="status-label">註冊流程優化</span>
+                <span class="status-value status-ok">✅ 學號→姓名→確認</span>
             </div>
             <div class="status-item">
-                <span class="status-label">AI回應簡潔化</span>
-                <span class="status-value status-ok">✅ 150字英文</span>
+                <span class="status-label">回應處理機制</span>
+                <span class="status-value status-ok">✅ 同步處理</span>
             </div>
             <div class="status-item">
-                <span class="status-label">統計邏輯簡化</span>
-                <span class="status-value status-ok">✅ 已部署</span>
+                <span class="status-label">快取系統</span>
+                <span class="status-value status-info">🚫 已移除</span>
             </div>
             <div class="status-item">
-                <span class="status-label">快取機制</span>
-                <span class="status-value status-ok">✅ 運行中</span>
+                <span class="status-label">AI回應風格</span>
+                <span class="status-value status-ok">✅ 150字學術英文</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">最後檢查時間</span>
+                <span class="status-value status-ok">{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</span>
             </div>
         </div>
         
@@ -1377,49 +1274,11 @@ def health_check():
         </div>
         """
 
-# =================== 註釋的複雜功能路由 ===================
-# 以下路由被註釋但保留，如需要可隨時恢復
-
-# @app.route('/teaching-insights')
-# def teaching_insights():
-#     """教學洞察頁面 - 已停用，保留程式碼"""
-#     return """
-#     <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-#         <h1>📈 教學洞察</h1>
-#         <p>此功能已簡化，請使用學生管理查看基本統計。</p>
-#         <a href="/students" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">前往學生管理</a>
-#     </div>
-#     """
-
-# @app.route('/export')
-# def export_page():
-#     """匯出功能頁面 - 已停用，保留程式碼"""
-#     return """
-#     <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-#         <h1>📊 資料匯出</h1>
-#         <p>此功能已簡化，請使用基本的下載功能。</p>
-#         <a href="/download-all-questions" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">下載對話記錄</a>
-#     </div>
-#     """
-
-# =================== 簡化API路由 ===================
-
-@app.route('/api/clear-cache', methods=['POST'])
-def api_clear_cache():
-    """清除快取 API"""
-    try:
-        global response_cache
-        cache_count = len(response_cache)
-        response_cache.clear()
-        logger.info(f"🧹 手動清除了 {cache_count} 個快取項目")
-        return jsonify({'status': 'success', 'cleared_count': cache_count})
-    except Exception as e:
-        logger.error(f"❌ 清除快取API錯誤: {e}")
-        return jsonify({'error': str(e)}), 500
+# =================== API 路由（簡化版）===================
 
 @app.route('/api/system-stats')
 def api_system_stats():
-    """系統統計 API（簡化版）"""
+    """系統統計 API（優化版）"""
     try:
         from models import Student, Message
         
@@ -1445,16 +1304,23 @@ def api_system_stats():
         except:
             today_messages = 0
         
-        # 快取統計
-        cache_count = len(response_cache)
+        # 註冊狀態統計
+        try:
+            need_registration = Student.select().where(Student.registration_step > 0).count()
+            completed_registration = Student.select().where(Student.registration_step == 0).count()
+        except:
+            need_registration = 0
+            completed_registration = total_students
         
         return jsonify({
             'total_students': total_students,
             'total_messages': total_messages,
             'active_students': active_students,
             'today_messages': today_messages,
-            'cache_count': cache_count,
+            'completed_registration': completed_registration,
+            'need_registration': need_registration,
             'ai_model': CURRENT_MODEL,
+            'system_status': 'optimized',
             'timestamp': datetime.datetime.now().isoformat()
         })
         
@@ -1462,11 +1328,11 @@ def api_system_stats():
         logger.error(f"❌ 系統統計API錯誤: {e}")
         return jsonify({'error': str(e)}), 500
 
-# =================== 簡化下載功能 ===================
+# =================== 資料匯出功能（簡化版）===================
 
 @app.route('/download-all-questions')
 def download_all_questions():
-    """下載所有學生對話記錄（簡化版）"""
+    """下載所有學生對話記錄（優化版）"""
     try:
         from models import Student, Message
         
@@ -1478,8 +1344,8 @@ def download_all_questions():
         if not messages:
             return jsonify({'error': '沒有找到任何對話記錄'}), 404
         
-        # 生成TSV內容（簡化版）
-        tsv_content = "時間\t學生姓名\t學號\t訊息內容\t來源\n"
+        # 生成TSV內容（優化版）
+        tsv_content = "時間\t學生姓名\t學號\t訊息內容\t來源\t註冊狀態\n"
         
         for msg in messages:
             student = msg.student
@@ -1487,14 +1353,15 @@ def download_all_questions():
             student_name = student.name or '未知學生'
             student_id = getattr(student, 'student_id', '未設定')
             content = msg.content.replace('\n', ' ').replace('\t', ' ')[:200]  # 限制長度
-            source = '學生' if msg.source_type == 'line' else 'AI助理'
+            source = '學生' if msg.source_type in ['line', 'student'] else 'AI助理'
+            reg_status = '已完成' if getattr(student, 'registration_step', 0) == 0 else '未完成'
             
-            tsv_content += f"{timestamp}\t{student_name}\t{student_id}\t{content}\t{source}\n"
+            tsv_content += f"{timestamp}\t{student_name}\t{student_id}\t{content}\t{source}\t{reg_status}\n"
         
         # 建立回應
         response = make_response(tsv_content)
         response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
-        filename = f"EMI_conversations_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.tsv"
+        filename = f"EMI_conversations_optimized_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.tsv"
         response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
         
         logger.info(f"✅ 成功下載 {len(messages)} 條對話記錄")
@@ -1504,13 +1371,28 @@ def download_all_questions():
         logger.error(f"❌ 下載對話記錄錯誤: {e}")
         return jsonify({'error': '下載失敗，請稍後再試'}), 500
 
-# =================== 主程式啟動配置 ===================
+# =================== 載入 routes.py 的額外功能 ===================
+
+# 載入 routes.py 中的額外路由和功能
+try:
+    from routes import register_routes
+    register_routes(app)
+    logger.info("✅ 成功載入 routes.py 的額外功能")
+except ImportError:
+    logger.warning("⚠️ routes.py 未找到，跳過額外功能載入")
+except Exception as e:
+    logger.error(f"❌ 載入 routes.py 時發生錯誤: {e}")
+
+# =================== app.py 優化版 - 第4段結束 ===================
+
+# =================== app.py 優化版 - 第5段開始 ===================
+# 主程式啟動配置和版本說明
 
 if __name__ == '__main__':
-    """簡化版主程式啟動配置"""
+    """優化版主程式啟動配置"""
     
     logger.info("🚀 EMI智能教學助理系統啟動中...")
-    logger.info("✨ 版本：v3.0 簡化版")
+    logger.info("✨ 版本：v4.0 優化版")
     
     # 資料庫初始化檢查
     try:
@@ -1521,6 +1403,14 @@ if __name__ == '__main__':
         student_count = Student.select().count()
         message_count = Message.select().count()
         logger.info(f"📊 資料庫狀態: {student_count} 位學生, {message_count} 條對話記錄")
+        
+        # 檢查註冊狀態
+        try:
+            need_registration = Student.select().where(Student.registration_step > 0).count()
+            if need_registration > 0:
+                logger.info(f"📝 待完成註冊: {need_registration} 位學生")
+        except:
+            pass
         
     except Exception as e:
         logger.error(f"❌ 資料庫初始化失敗: {e}")
@@ -1543,22 +1433,23 @@ if __name__ == '__main__':
     else:
         logger.warning("⚠️ LINE Bot 服務未配置，請設定相關環境變數")
     
-    # 簡化功能說明
-    logger.info("✨ 簡化功能特色:")
-    logger.info("  - 🎓 首次註冊自動詢問姓名和學號")
-    logger.info("  - 🤖 AI回應簡潔化：150字英文學術風格")
+    # 優化功能說明
+    logger.info("✨ 優化功能特色:")
+    logger.info("  - 🎓 優化註冊流程：學號→姓名→確認（三步驟）")
+    logger.info("  - 🤖 同步回應處理：訊息→AI→DB→回應（移除快取）")
     logger.info("  - 📊 統計邏輯簡化：只顯示對話數、時間等基本資訊")
-    logger.info("  - 💾 快取系統：提升回應速度")
-    logger.info("  - 🔧 註釋複雜功能：保留程式碼但停用複雜分析")
+    logger.info("  - 🚫 移除快取系統：每次提供個性化回應")
+    logger.info("  - 🔧 保留必要功能：AI對話、學生管理、學習建議、匯出")
     
     # 啟動 Flask 應用程式
     logger.info(f"🌐 啟動 Web 服務於 {HOST}:{PORT}")
     logger.info("📚 可用功能:")
-    logger.info("  - 🤖 AI 對話系統")
-    logger.info("  - 📱 LINE Bot 整合")
-    logger.info("  - 👥 學生管理（簡化版）")
-    logger.info("  - 📋 學習建議（AI生成）")
-    logger.info("  - 🔍 系統監控")
+    logger.info("  - 🤖 AI 對話系統（150字學術英文回應）")
+    logger.info("  - 📱 LINE Bot 整合（優化註冊流程）")
+    logger.info("  - 👥 學生管理（簡化版統計）")
+    logger.info("  - 📋 學習建議（AI生成個人化建議）")
+    logger.info("  - 🔍 系統監控（健康檢查與狀態確認）")
+    logger.info("  - 📊 資料匯出（TSV格式對話記錄）")
     
     try:
         app.run(
@@ -1574,40 +1465,112 @@ if __name__ == '__main__':
 # =================== 版本說明 ===================
 
 """
-EMI 智能教學助理系統 v3.0 - 簡化版
+EMI 智能教學助理系統 v4.0 - 優化版
 =====================================
 
-🎯 簡化重點:
-- 🎓 首次註冊流程：自動詢問姓名和學號
-- 🤖 AI回應優化：150字英文，學術簡潔風格
-- 📊 統計大簡化：移除參與度、提問數等複雜計算
-- 🔧 功能精簡：註釋複雜功能，保留核心對話功能
-- 💾 快取機制：提升系統回應速度
+🎯 主要優化重點:
+- 🎓 註冊流程優化：學號→姓名→確認（三步驟，含驗證）
+- 🤖 回應機制改進：同步處理流程，移除快取系統
+- 📊 統計功能簡化：專注核心數據，移除複雜計算
+- 🔧 程式碼精簡：保留必要功能，提升維護性
+- 💾 資料庫優化：完善的註冊狀態追蹤
 
 ✨ 新功能特色:
-- 首次使用時會引導學生提供姓名和學號
-- AI回應符合EMI課程需求，簡潔準確
-- 學習建議由AI生成，150字英文簡潔建議
-- 快取詳情可查看，包含數量、有效期、命中率等
-- 系統健康檢查顯示所有關鍵狀態
+- 三步驟註冊流程：清晰的學號→姓名→確認過程
+- 同步回應處理：訊息→AI處理→資料庫記錄→發送回應
+- 移除快取系統：確保每次都提供個性化教學回應
+- 優化錯誤處理：完善的異常捕獲和用戶友好提示
+- 簡化統計顯示：專注於對話數、活動時間等核心指標
 
-🚀 保留功能:
-- AI 對話系統: 支援 Gemini 2.5 系列模型
-- LINE Bot 整合: 完整 Webhook 支援
-- 學生管理: 註冊、查看、基本統計
-- 學習建議: AI生成個人化建議
-- 系統監控: 健康檢查與狀態確認
+🚀 保留核心功能:
+- AI 對話系統: 支援 Gemini 2.5 系列模型，150字學術英文回應
+- LINE Bot 整合: 完整 Webhook 支援，優化的註冊引導流程
+- 學生管理系統: 註冊狀態追蹤、基本統計、學生清單管理
+- 學習建議生成: AI個人化建議，基於對話歷史分析
+- 系統監控工具: 健康檢查、狀態確認、效能統計
+- 資料匯出功能: TSV格式對話記錄，包含註冊狀態
 
 📋 移除/簡化功能:
-- 參與度複雜計算 → 簡化為對話數和活動時間
-- 教學洞察複雜分析 → 註釋保留，可恢復
-- 提問數統計 → 改為總對話數統計
-- 複雜圖表和報告 → 簡化為基本列表展示
+- 快取系統 → 完全移除，確保回應個性化
+- 複雜統計計算 → 簡化為基本對話數和活動時間統計
+- 冗長註冊流程 → 優化為清晰的三步驟確認流程
+- 複雜圖表和報告 → 簡化為實用的列表和基本統計展示
+
+🔧 技術改進:
+- 同步處理架構：避免併發問題，確保資料一致性
+- 錯誤處理強化：完善的異常捕獲和日誌記錄
+- 資料庫查詢優化：簡化查詢邏輯，提升效能
+- 程式碼結構清理：移除冗餘代碼，提升可維護性
+
+📈 預期效益:
+- 用戶體驗提升：清晰的註冊流程，穩定的回應機制
+- 系統穩定性增強：移除複雜快取邏輯，減少故障點
+- 維護成本降低：程式碼簡化，功能聚焦核心需求
+- 教學品質改善：個性化AI回應，無快取干擾
+
+🔄 升級路徑:
+從 v3.0 → v4.0 的主要變更：
+1. 重寫註冊流程處理函數
+2. 移除所有快取相關程式碼
+3. 優化訊息處理為同步流程
+4. 簡化統計和展示邏輯
+5. 保留並優化所有核心教學功能
 
 版本日期: 2025年6月29日
-簡化版本: v3.0
-設計理念: 簡潔、實用、高效、易維護
+優化版本: v4.0
+設計理念: 簡潔、穩定、高效、專注教學核心
+開發團隊: EMI智能教學助理系統開發組
 """
 
-# =================== app.py 簡化版 - 第3段結束 ===================
+# =================== 相容性和向後支援 ===================
+
+# 確保與現有 routes.py 和 utils.py 的相容性
+try:
+    # 嘗試載入 utils.py 中的輔助函數（如果需要）
+    from utils import get_system_stats, perform_system_health_check
+    logger.info("✅ 成功載入 utils.py 輔助函數")
+except ImportError:
+    logger.info("ℹ️ utils.py 輔助函數未載入，使用內建功能")
+except Exception as e:
+    logger.warning(f"⚠️ 載入 utils.py 時發生警告: {e}")
+
+# 向後相容性函數（如果其他模組需要）
+def get_cached_response(*args, **kwargs):
+    """向後相容性函數 - 快取系統已移除"""
+    return None
+
+def cache_response(*args, **kwargs):
+    """向後相容性函數 - 快取系統已移除"""
+    pass
+
+def cleanup_response_cache():
+    """向後相容性函數 - 快取系統已移除"""
+    pass
+
+# =================== 模組匯出 ===================
+
+__all__ = [
+    # Flask 應用程式
+    'app',
+    
+    # 核心配置
+    'CHANNEL_ACCESS_TOKEN', 'CHANNEL_SECRET', 'GEMINI_API_KEY',
+    'line_bot_api', 'handler', 'CURRENT_MODEL',
+    
+    # 註冊和AI函數
+    'handle_student_registration',
+    'generate_ai_response', 
+    'generate_learning_suggestion',
+    'get_fallback_suggestion',
+    
+    # 向後相容性函數
+    'get_cached_response', 'cache_response', 'cleanup_response_cache',
+    
+    # 版本資訊
+    '__version__'
+]
+
+__version__ = "4.0.0"
+
+# =================== app.py 優化版 - 第5段結束 ===================
 # =================== 程式檔案結束 ===================
