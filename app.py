@@ -1573,7 +1573,7 @@ def students_list():
         <!-- 快速操作 -->
         <div class="quick-actions">
             <div class="action-card">
-                <h4>👥 學生管理</h4>
+                <h4>&#128101; 學生管理</h4>
                 <p>檢視和管理所有學生資料</p>
                 <a href="/students" class="action-btn">學生管理</a>
             </div>
