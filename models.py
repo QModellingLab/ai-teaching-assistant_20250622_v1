@@ -1,7 +1,7 @@
-# =================== models.py 更新版 - 第1段開始 ===================
-# EMI智能教學助理系統 - 資料模型定義（增加記憶功能和學習歷程）
+# =================== models.py 修正版 - 第1段開始 ===================
+# EMI智能教學助理系統 - 資料模型定義（修正版：添加缺失的 update_session_stats 方法）
 # 支援優化的註冊流程，移除快取依賴，新增會話追蹤和學習歷程
-# 更新日期：2025年6月29日
+# 修正日期：2025年6月30日 - 解決AI回應問題
 
 import os
 import datetime
@@ -67,6 +67,74 @@ class Student(BaseModel):
     
     def __str__(self):
         return f"Student({self.name}, {self.student_id}, {self.line_user_id})"
+    
+    # =================== 演示學生相關屬性（保留向後相容） ===================
+    
+    @property
+    def is_demo_student(self):
+        """檢查是否為演示學生"""
+        return (
+            self.name.startswith('[DEMO]') or 
+            self.line_user_id.startswith('demo_') or 
+            self.name.startswith('學生_')
+        )
+    
+    @property
+    def is_real_student(self):
+        """檢查是否為真實學生"""
+        return not self.is_demo_student
+    
+    @classmethod
+    def get_real_students(cls):
+        """取得所有真實學生"""
+        return cls.select().where(
+            (~cls.name.startswith('[DEMO]')) &
+            (~cls.line_user_id.startswith('demo_')) &
+            (~cls.name.startswith('學生_'))
+        )
+    
+    @classmethod
+    def get_demo_students(cls):
+        """取得所有演示學生"""
+        return cls.select().where(
+            (cls.name.startswith('[DEMO]')) |
+            (cls.line_user_id.startswith('demo_')) |
+            (cls.name.startswith('學生_'))
+        )
+    
+    @classmethod
+    def cleanup_demo_students(cls):
+        """清理所有演示學生"""
+        try:
+            demo_students = list(cls.get_demo_students())
+            
+            if not demo_students:
+                return {
+                    'success': True,
+                    'students_deleted': 0,
+                    'message': '沒有找到演示學生'
+                }
+            
+            deleted_count = 0
+            for student in demo_students:
+                student.delete_instance(recursive=True)
+                deleted_count += 1
+            
+            logger.info(f"成功清理 {deleted_count} 位演示學生")
+            
+            return {
+                'success': True,
+                'students_deleted': deleted_count,
+                'message': f"成功清理 {deleted_count} 位演示學生"
+            }
+            
+        except Exception as e:
+            logger.error(f"清理演示學生錯誤: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': '清理演示學生時發生錯誤'
+            }
     
     # =================== 基本查詢方法（優化版） ===================
     
@@ -273,10 +341,15 @@ class Student(BaseModel):
             logger.error(f"❌ 取得會話次數失敗: {e}")
             return 0
 
-# =================== 對話會話模型（新增） ===================
+# =================== models.py 修正版 - 第1段結束 ===================
+
+# =================== models.py 修正版 - 第2段開始 ===================
+# 接續第1段，包含：對話會話模型（修正版：添加缺失的 update_session_stats 方法）
+
+# =================== 對話會話模型（修正版） ===================
 
 class ConversationSession(BaseModel):
-    """對話會話模型 - 追蹤連續的對話會話"""
+    """對話會話模型 - 修正版：添加缺失的 update_session_stats 方法"""
     
     id = AutoField(primary_key=True)
     student = ForeignKeyField(Student, backref='conversation_sessions', verbose_name="學生")
@@ -335,8 +408,39 @@ class ConversationSession(BaseModel):
                 Message.session == self
             ).count()
             self.save()
+            logger.debug(f"更新會話 {self.id} 訊息計數: {self.message_count}")
         except Exception as e:
             logger.error(f"❌ 更新會話訊息計數失敗: {e}")
+    
+    # 🔧 **關鍵修正：添加缺失的 update_session_stats 方法**
+    def update_session_stats(self):
+        """
+        更新會話統計 - 修正版
+        這是app.py中調用但在原models.py中缺失的方法
+        解決第二個專業問題後AI沒有回應的根本問題
+        """
+        try:
+            # 更新訊息計數
+            self.message_count = Message.select().where(
+                Message.session == self
+            ).count()
+            
+            # 更新最後活動時間（如果需要）
+            if hasattr(self, 'last_activity'):
+                self.last_activity = datetime.datetime.now()
+            
+            # 儲存更新
+            self.save()
+            
+            logger.debug(f"✅ 更新會話統計 (ID: {self.id})，訊息數: {self.message_count}")
+            
+            # 同時更新學生的活動時間
+            if self.student:
+                self.student.update_activity()
+            
+        except Exception as e:
+            logger.error(f"❌ 更新會話統計失敗 (ID: {getattr(self, 'id', 'unknown')}): {e}")
+            # 即使統計更新失敗，也不要影響主要流程
     
     def get_messages(self):
         """取得會話中的所有訊息"""
@@ -355,6 +459,59 @@ class ConversationSession(BaseModel):
         
         time_since_start = datetime.datetime.now() - self.session_start
         return time_since_start.total_seconds() > (timeout_minutes * 60)
+    
+    def get_last_message_time(self):
+        """取得最後一則訊息的時間"""
+        try:
+            last_message = Message.select().where(
+                Message.session == self
+            ).order_by(Message.timestamp.desc()).first()
+            
+            return last_message.timestamp if last_message else self.session_start
+        except Exception as e:
+            logger.error(f"❌ 取得最後訊息時間失敗: {e}")
+            return self.session_start
+    
+    def should_auto_end_by_inactivity(self, timeout_minutes=30):
+        """檢查是否應該基於非活躍狀態自動結束會話"""
+        if self.session_end:
+            return False  # 已經結束
+        
+        last_activity = self.get_last_message_time()
+        time_since_activity = datetime.datetime.now() - last_activity
+        return time_since_activity.total_seconds() > (timeout_minutes * 60)
+    
+    def get_context_summary(self):
+        """取得會話的上下文摘要"""
+        try:
+            messages = self.get_messages()
+            if not messages:
+                return "空會話"
+            
+            # 簡單的上下文摘要
+            total_messages = len(messages)
+            topics = set()
+            
+            for msg in messages:
+                if msg.topic_tags:
+                    tags = [tag.strip() for tag in msg.topic_tags.split(',') if tag.strip()]
+                    topics.update(tags)
+            
+            duration = self.get_duration_minutes()
+            
+            summary_parts = [
+                f"{total_messages} 則訊息",
+                f"{duration:.1f} 分鐘" if self.session_end else f"進行中 {duration:.1f} 分鐘"
+            ]
+            
+            if topics:
+                summary_parts.append(f"主題: {', '.join(list(topics)[:3])}")
+            
+            return " | ".join(summary_parts)
+            
+        except Exception as e:
+            logger.error(f"❌ 取得會話摘要失敗: {e}")
+            return "摘要生成失敗"
     
     @classmethod
     def cleanup_old_sessions(cls, days_old=30):
@@ -386,8 +543,10 @@ class ConversationSession(BaseModel):
             
             ended_count = 0
             for session in inactive_sessions:
-                session.end_session("自動結束（非活躍）")
-                ended_count += 1
+                # 檢查最後訊息時間，而不只是會話開始時間
+                if session.should_auto_end_by_inactivity(timeout_minutes):
+                    session.end_session("自動結束（非活躍）")
+                    ended_count += 1
             
             if ended_count > 0:
                 logger.info(f"✅ 自動結束了 {ended_count} 個非活躍會話")
@@ -396,10 +555,26 @@ class ConversationSession(BaseModel):
         except Exception as e:
             logger.error(f"❌ 自動結束會話失敗: {e}")
             return 0
-
-# =================== models.py 更新版 - 第1段結束 ===================
-
-# =================== models.py 更新版 - 第2段開始 ===================
+    
+    @classmethod
+    def get_active_sessions_count(cls):
+        """取得目前活躍會話數量"""
+        try:
+            return cls.select().where(cls.session_end.is_null()).count()
+        except Exception as e:
+            logger.error(f"❌ 取得活躍會話數量失敗: {e}")
+            return 0
+    
+    @classmethod
+    def get_recent_sessions(cls, limit=10):
+        """取得最近的會話"""
+        try:
+            return list(cls.select().order_by(
+                cls.session_start.desc()
+            ).limit(limit))
+        except Exception as e:
+            logger.error(f"❌ 取得最近會話失敗: {e}")
+            return []
 
 # =================== 訊息模型（增強版，支援會話追蹤） ===================
 
@@ -435,6 +610,82 @@ class Message(BaseModel):
         session_info = f", 會話{self.session.id}" if self.session else ""
         return f"Message({self.student.name}, {self.source_type}, {self.timestamp}{session_info})"
     
+    # =================== 演示訊息相關屬性（保留向後相容） ===================
+    
+    @property
+    def is_demo_message(self):
+        """檢查是否為演示訊息"""
+        return self.student.is_demo_student
+    
+    @property
+    def is_real_message(self):
+        """檢查是否為真實訊息"""
+        return not self.is_demo_message
+    
+    @property
+    def is_student_message(self):
+        """檢查是否為學生訊息"""
+        return self.source_type in ['line', 'student']
+    
+    @property
+    def is_ai_message(self):
+        """檢查是否為AI訊息"""
+        return self.source_type == 'ai'
+    
+    @classmethod
+    def get_real_messages(cls):
+        """取得所有真實訊息"""
+        return cls.select().join(Student).where(
+            (~Student.name.startswith('[DEMO]')) &
+            (~Student.line_user_id.startswith('demo_')) &
+            (~Student.name.startswith('學生_'))
+        )
+    
+    @classmethod
+    def get_demo_messages(cls):
+        """取得所有演示訊息"""
+        return cls.select().join(Student).where(
+            (Student.name.startswith('[DEMO]')) |
+            (Student.line_user_id.startswith('demo_')) |
+            (Student.name.startswith('學生_'))
+        )
+    
+    @classmethod
+    def cleanup_demo_messages(cls):
+        """清理所有演示訊息"""
+        try:
+            demo_messages = list(cls.get_demo_messages())
+            
+            if not demo_messages:
+                return {
+                    'success': True,
+                    'total_deleted': 0,
+                    'message': '沒有找到演示訊息'
+                }
+            
+            deleted_count = 0
+            for message in demo_messages:
+                message.delete_instance()
+                deleted_count += 1
+            
+            logger.info(f"成功清理 {deleted_count} 則演示訊息")
+            
+            return {
+                'success': True,
+                'total_deleted': deleted_count,
+                'message': f"成功清理 {deleted_count} 則演示訊息"
+            }
+            
+        except Exception as e:
+            logger.error(f"清理演示訊息錯誤: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': '清理演示訊息時發生錯誤'
+            }
+    
+    # =================== 訊息創建和管理（修正版） ===================
+    
     @classmethod
     def create(cls, **data):
         """創建訊息（覆寫以添加會話管理和統計更新）"""
@@ -469,12 +720,13 @@ class Message(BaseModel):
             except Exception as e:
                 logger.warning(f"更新學生統計失敗: {e}")
             
-            # 更新會話的訊息計數
+            # 🔧 **關鍵修正：使用修正版的 update_session_stats 方法**
             if message.session:
                 try:
-                    message.session.update_message_count()
+                    message.session.update_session_stats()
                 except Exception as e:
                     logger.warning(f"更新會話統計失敗: {e}")
+                    # 不要因為統計更新失敗而影響訊息創建
             
             return message
         except Exception as e:
@@ -517,47 +769,14 @@ class Message(BaseModel):
         except Exception as e:
             logger.error(f"❌ 設定AI回應失敗: {e}")
     
-    @property
-    def is_demo_message(self):
-        """檢查是否為演示訊息"""
-        return self.student.is_demo_student
-    
-    @property
-    def is_real_message(self):
-        """檢查是否為真實訊息"""
-        return not self.is_demo_message
-    
-    @property
-    def is_student_message(self):
-        """檢查是否為學生訊息"""
-        return self.source_type in ['line', 'student']
-    
-    @property
-    def is_ai_message(self):
-        """檢查是否為AI訊息"""
-        return self.source_type == 'ai'
-    
-    @classmethod
-    def get_real_messages(cls):
-        """取得所有真實訊息"""
-        return cls.select().join(Student).where(
-            (~Student.name.startswith('[DEMO]')) &
-            (~Student.line_user_id.startswith('demo_')) &
-            (~Student.name.startswith('學生_'))
-        )
-    
-    @classmethod
-    def get_demo_messages(cls):
-        """取得所有演示訊息"""
-        return cls.select().join(Student).where(
-            (Student.name.startswith('[DEMO]')) |
-            (Student.line_user_id.startswith('demo_')) |
-            (Student.name.startswith('學生_'))
-        )
+    # =================== 對話上下文功能（記憶功能核心） ===================
     
     @classmethod
     def get_conversation_context(cls, student, limit=5):
-        """取得學生的對話上下文（用於記憶功能）"""
+        """
+        取得學生的對話上下文（用於記憶功能）- 修正版
+        這是app.py中需要調用的核心記憶功能方法
+        """
         try:
             recent_messages = list(cls.select().where(
                 cls.student == student
@@ -604,40 +823,11 @@ class Message(BaseModel):
                 'conversation_flow': [],
                 'session_info': None
             }
-    
-    @classmethod
-    def cleanup_demo_messages(cls):
-        """清理所有演示訊息"""
-        try:
-            demo_messages = list(cls.get_demo_messages())
-            
-            if not demo_messages:
-                return {
-                    'success': True,
-                    'total_deleted': 0,
-                    'message': '沒有找到演示訊息'
-                }
-            
-            deleted_count = 0
-            for message in demo_messages:
-                message.delete_instance()
-                deleted_count += 1
-            
-            logger.info(f"成功清理 {deleted_count} 則演示訊息")
-            
-            return {
-                'success': True,
-                'total_deleted': deleted_count,
-                'message': f"成功清理 {deleted_count} 則演示訊息"
-            }
-            
-        except Exception as e:
-            logger.error(f"清理演示訊息錯誤: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'message': '清理演示訊息時發生錯誤'
-            }
+
+# =================== models.py 修正版 - 第2段結束 ===================
+
+# =================== models.py 修正版 - 第3段開始 ===================
+# 接續第2段，包含：學習歷程模型、分析模型
 
 # =================== 學習歷程模型（新增） ===================
 
@@ -918,9 +1108,10 @@ class Analysis(BaseModel):
                 'message': '清理演示分析時發生錯誤'
             }
 
-# =================== models.py 更新版 - 第2段結束 ===================
+# =================== models.py 修正版 - 第3段結束 ===================
 
-# =================== models.py 更新版 - 第3段開始 ===================
+# =================== models.py 修正版 - 第4段開始 ===================
+# 接續第3段，包含：資料庫初始化、遷移、管理功能
 
 # =================== 資料庫初始化和管理 ===================
 
@@ -1330,9 +1521,10 @@ def cleanup_all_demo_data():
             'message': '清理演示資料時發生錯誤'
         }
 
-# =================== models.py 更新版 - 第3段結束 ===================
+# =================== models.py 修正版 - 第4段結束 ===================
 
-# =================== models.py 更新版 - 第4段開始 ===================
+# =================== models.py 修正版 - 第5段開始 ===================
+# 接續第4段，包含：資料驗證、修復功能、相容性和初始化
 
 # =================== 資料驗證和修復功能（增強版） ===================
 
@@ -1580,6 +1772,39 @@ def get_student_demo_data_summary(student):
         logger.error(f"❌ 取得學生演示資料摘要失敗: {e}")
         return {}
 
+# =================== 檢查資料庫就緒狀態（修正版） ===================
+
+def check_database_ready():
+    """檢查資料庫是否就緒，包含修正版的會話統計檢查"""
+    try:
+        # 基本表格檢查
+        Student.select().count()
+        Message.select().count()
+        Analysis.select().count()
+        
+        # 🔧 **關鍵修正：檢查新增表格和 update_session_stats 方法**
+        try:
+            ConversationSession.select().count()
+            LearningHistory.select().count()
+            
+            # 測試 update_session_stats 方法是否可用
+            test_sessions = ConversationSession.select().limit(1)
+            for session in test_sessions:
+                # 測試方法是否存在（不實際執行）
+                if hasattr(session, 'update_session_stats'):
+                    logger.debug("✅ update_session_stats 方法已可用")
+                else:
+                    logger.warning("⚠️ update_session_stats 方法缺失")
+                break
+            
+        except Exception as e:
+            logger.warning(f"新增表格檢查失敗: {e}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"❌ 資料庫就緒檢查失敗: {e}")
+        return False
+
 # =================== 相容性和初始化 ===================
 
 # 保持向後相容性的別名
@@ -1599,7 +1824,7 @@ if __name__ != '__main__':
         # 重設不完整的註冊狀態
         reset_registration_for_incomplete_students()
         
-        logger.info("✅ models.py 自動初始化完成（支援記憶功能和學習歷程）")
+        logger.info("✅ models.py 自動初始化完成（修正版：支援記憶功能、學習歷程和 update_session_stats 方法）")
         
     except Exception as e:
         logger.error(f"❌ models.py 自動初始化失敗: {e}")
@@ -1611,7 +1836,7 @@ __all__ = [
     'db', 'BaseModel', 
     'Student', 'Message', 'Analysis',
     
-    # 新增類別
+    # 新增類別（包含修正版的 ConversationSession）
     'ConversationSession', 'LearningHistory',
     
     # 資料庫管理函數
@@ -1626,23 +1851,26 @@ __all__ = [
     
     # 新增管理函數
     'manage_conversation_sessions', 'manage_learning_histories',
-    'get_student_demo_data_summary'
+    'get_student_demo_data_summary', 'check_database_ready'
 ]
 
 # =================== 版本說明 ===================
 
 """
-EMI 智能教學助理系統 - models.py 更新版
+EMI 智能教學助理系統 - models.py 修正版
 =====================================
 
-🎯 更新重點:
-- ✨ 新增 ConversationSession 模型：支援對話會話追蹤和記憶功能
-- ✨ 新增 LearningHistory 模型：支援學習歷程記錄和分析
-- ✨ 增強 Message 模型：新增會話關聯、主題標籤、AI回應欄位
-- ✨ 保持完全向後相容：所有原有功能維持不變
-- 🔧 增強資料庫遷移：自動添加新欄位和新表格
+🔧 關鍵修正 (2025年6月30日):
+- ✅ **添加缺失的 update_session_stats() 方法**：解決第二個專業問題後AI沒有回應的根本問題
+- ✅ **修正 ConversationSession 類別**：確保與 app.py 完全兼容
+- ✅ **改善錯誤處理**：即使統計更新失敗也不影響主要流程
+- ✅ **保持向後相容**：所有原有功能維持不變
 
-✨ 新增功能:
+🎯 主要問題解決:
+1. **註冊流程修正**：新用戶第一次發訊息會正確詢問學號 (在app.py中已修正)
+2. **AI回應問題修正**：添加缺失的 update_session_stats() 方法 (✅ 本次修正)
+
+✨ 新增功能保持不變:
 - 對話會話追蹤：支援連續對話的記憶功能
 - 學習歷程生成：深度分析學生學習軌跡和發展
 - 主題標籤系統：自動識別和標記討論主題
@@ -1652,43 +1880,49 @@ EMI 智能教學助理系統 - models.py 更新版
 🗂️ 資料模型更新:
 - Student: 新增會話相關方法（get_active_session, start_new_session等）
 - Message: 新增 session, topic_tags, ai_response 欄位
-- ConversationSession: 全新模型，管理對話會話
+- ConversationSession: **修正版**，包含缺失的 update_session_stats() 方法
 - LearningHistory: 全新模型，記錄學習歷程
 - Analysis: 保持不變，向後相容
 
-🔄 資料庫遷移:
-- 自動添加新欄位：session_id, topic_tags, ai_response
-- 自動創建新表格：conversation_sessions, learning_histories  
-- 向後相容性：所有現有資料保持完整
-- 智慧修復：自動為歷史訊息創建會話關聯
+🔧 關鍵修正詳情:
+```python
+def update_session_stats(self):
+    """更新會話統計 - 修正版"""
+    try:
+        # 更新訊息計數
+        self.message_count = Message.select().where(
+            Message.session == self
+        ).count()
+        
+        # 儲存更新
+        self.save()
+        
+        # 同時更新學生的活動時間
+        if self.student:
+            self.student.update_activity()
+            
+    except Exception as e:
+        logger.error(f"❌ 更新會話統計失敗: {e}")
+        # 即使統計更新失敗，也不要影響主要流程
+```
 
-📊 統計功能增強:
-- 會話統計：總數、活躍、平均時長
-- 學習歷程統計：生成數量、覆蓋學生數
-- 增強清理：支援演示會話和學習歷程清理
-- 資料驗證：檢查會話關聯和學習歷程完整性
+🚀 部署建議:
+1. 替換完整的 models.py 檔案
+2. 重新啟動應用程式
+3. 測試註冊流程和AI回應功能
+4. 檢查健康檢查頁面確認修正狀態
 
-🔧 管理功能:
-- manage_conversation_sessions(): 自動會話管理
-- manage_learning_histories(): 學習歷程記錄管理
-- 增強的資料驗證和修復功能
-- 完整的演示資料清理支援
+📊 修正驗證:
+- check_database_ready() 函數會檢查 update_session_stats 方法是否可用
+- 健康檢查頁面會顯示修正狀態
+- 日誌會記錄方法的可用性
 
-🚀 記憶功能支援:
-- Message.get_conversation_context(): 取得對話上下文
-- Student.get_active_session(): 取得目前活躍會話
-- ConversationSession.get_messages(): 取得會話中的所有訊息
-
-📈 學習歷程支援:
-- LearningHistory.get_latest_for_student(): 取得最新學習歷程
-- 支援 JSON 格式儲存複雜的學習資料
-- 自動統計更新和清理機制
-
-版本日期: 2025年6月29日
-更新版本: v4.1 (記憶功能和學習歷程)
-設計理念: 向後相容、功能完整、智慧管理
-新增特色: 記憶功能、學習歷程、會話追蹤、智慧清理
+版本: v4.2.2 (修正版)
+修正日期: 2025年6月30日
+修正重點: 解決AI回應中斷問題
+設計理念: 向後相容、功能完整、問題修正
+核心修正: 添加缺失的 update_session_stats() 方法
 """
 
-# =================== models.py 更新版 - 第4段結束 ===================
+# =================== models.py 修正版 - 第5段結束 ===================
 # =================== 完整檔案結束 ===================
