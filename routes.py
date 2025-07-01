@@ -363,9 +363,9 @@ def register_routes(app):
     # 匯出功能（保留）
     # =========================================
     
-    @app.route('/students/export', endpoint='routes_export_students')
+    @app.route('/students/export/alternative', endpoint='routes_export_students_alt')
     def export_students_list():
-        """匯出學生清單（TSV格式）"""
+        """匯出學生清單（TSV格式）- 替代路由避免衝突"""
         try:
             students = list(Student.select())
             
