@@ -1841,7 +1841,7 @@ def export_students():
     except Exception as e:
         logger.error(f"[ERROR] 學生清單匯出失敗: {e}")
         return f"Export failed: {str(e)}", 500
-"""
+
 
 @app.route('/export/tsv')
 def export_tsv():
@@ -1895,6 +1895,7 @@ def export_tsv():
     except Exception as e:
         logger.error(f"[ERROR] 完整對話資料匯出失敗: {e}")
         return f"Export failed: {str(e)}", 500
+"""
 
 @app.route('/api/stats')
 def get_stats():
