@@ -364,8 +364,8 @@ def register_routes(app):
     # =========================================
     
     @app.route('/students/export/backup', endpoint='backup_export_students')
-    def export_students_list():
-        """匯出學生清單（TSV格式）- 替代路由避免衝突"""
+    def backup_export_students():  # ← 改成與端點名稱一致
+        """匯出學生清單（TSV格式）- 備用路由避免衝突"""
         try:
             students = list(Student.select())
             
@@ -373,7 +373,11 @@ def register_routes(app):
             output.write("ID\t姓名\tLINE_ID\t參與度\t訊息數\t最後活動\n")
             
             for student in students:
-                output.write(f"{student.id}\t{student.name}\t{student.line_user_id}\t{student.participation_rate:.1f}%\t{student.message_count}\t{student.last_active or 'N/A'}\n")
+                participation_rate = getattr(student, 'participation_rate', 0)
+                message_count = getattr(student, 'message_count', 0)
+                last_active = getattr(student, 'last_active', 'N/A')
+
+                output.write(f"{student.id}\t{student.name or 'N/A'}\t{student.line_user_id or 'N/A'}\t{participation_rate:.1f}%\t{message_count}\t{last_active}\n")
             
             output.seek(0)
             content = output.getvalue()
