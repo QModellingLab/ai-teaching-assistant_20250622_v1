@@ -1790,6 +1790,9 @@ def export_tsv():
 # 接續第3段，包含：其他API端點、健康檢查、錯誤處理
 
 # =================== 其他保留的API端點 ===================
+
+# 移除重複的函數 - 完全註解掉
+"""
 @app.route('/students/export')
 def export_students():
     """匯出學生清單為 TSV"""
@@ -1838,6 +1841,7 @@ def export_students():
     except Exception as e:
         logger.error(f"[ERROR] 學生清單匯出失敗: {e}")
         return f"Export failed: {str(e)}", 500
+"""
 
 @app.route('/export/tsv')
 def export_tsv():
