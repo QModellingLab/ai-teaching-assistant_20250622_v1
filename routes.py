@@ -363,7 +363,7 @@ def register_routes(app):
     # 匯出功能（保留）
     # =========================================
     
-    @app.route('/students/export')
+    @app.route('/students/export', endpoint='routes_export_students')
     def export_students_list():
         """匯出學生清單（TSV格式）"""
         try:
