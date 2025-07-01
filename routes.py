@@ -363,7 +363,7 @@ def register_routes(app):
     # 匯出功能（保留）
     # =========================================
     
-    @app.route('/students/export/alternative', endpoint='routes_export_students_alt')
+    @app.route('/students/export/backup', endpoint='backup_export_students')
     def export_students_list():
         """匯出學生清單（TSV格式）- 替代路由避免衝突"""
         try:
