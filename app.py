@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 # =================== EMI 智能教學助理 - 精確修改版 app.py ===================
 # 第 1 段：基本配置和核心功能(第 1-600 行)
-# 版本: 4.3.0 - 精確修改版
-# 日期: 2025年7月1日
-# 修正: 移除備用回應系統、簡化AI提示詞、英文化註冊流程、AI失效處理機制
+# 版本: 4.3.1 - 語法錯誤修復版
+# 日期: 2025年7月2日
+# 修正: 移除重複函數定義、修復語法錯誤、保持所有功能
 
 import os
 import json
@@ -934,8 +934,8 @@ def export_student_conversations():
 
 # =================== 第2段結束標記 ===================
 
-# =================== app.py 修改版 - 第3段-A開始 ===================
-# 接續第2段，包含：資料庫狀態檢查、系統首頁(修改版)
+# =================== app.py 修改版 - 第3段開始 ===================
+# 接續第2段，包含：資料庫狀態檢查、系統首頁、API端點
 
 # =================== 資料庫狀態檢查路由 ===================
 @app.route('/database-status')
@@ -1227,11 +1227,6 @@ def setup_database_force():
 </html>
         """
 
-# =================== app.py 修改版 - 第3段-A結束 ===================
-
-# =================== app.py 修改版 - 第3段-B開始 ===================
-# 接續第3段-A，包含：系統首頁(修改版)
-
 # =================== 系統首頁(修改版)===================
 @app.route('/')
 def index():
@@ -1416,21 +1411,22 @@ def index():
     <div class="container">
         <!-- 系統標題 -->
         <div class="header">
-            <h1>EMI Teaching Assistant System <span class="version-badge">Precise Modification v4.3.0</span></h1>
-            <p>Practical Applications of AI in Life and Learning - Precise Modification Version</p>
+            <h1>EMI Teaching Assistant System <span class="version-badge">Precise Modification v4.3.1</span></h1>
+            <p>Practical Applications of AI in Life and Learning - Syntax Error Fixed Version</p>
         </div>
         
         <!-- 修改狀態提示 -->
         <div class="modification-status">
             <h3>✅ Precise Modifications Completed:</h3>
             <ul class="modification-list">
+                <li><strong>Fixed Syntax Errors:</strong> Removed duplicate function definitions and orphaned docstrings</li>
                 <li><strong>Removed Backup Response System:</strong> All questions are now directly sent to Gemini AI</li>
                 <li><strong>Simplified AI Prompts:</strong> Only "Please answer in brief." added, removed complex restrictions</li>
                 <li><strong>English Registration Flow:</strong> All registration messages changed to English</li>
                 <li><strong>Removed Session Management:</strong> Messages recorded directly without session association</li>
                 <li><strong>Enhanced Memory Function:</strong> AI-generated topic tags replace fixed keywords</li>
                 <li><strong>AI Failure Handling:</strong> Backup AI models and detailed error logging implemented</li>
-                <li><strong>New Export Function:</strong> Added export for all student conversations (TSV format)</li>
+                <li><strong>Export Functions:</strong> Added export for all student conversations (TSV format)</li>
             </ul>
         </div>
         
@@ -1519,10 +1515,10 @@ def index():
         <div style="margin-top: 40px; padding: 20px; background: #f1f2f6; border-radius: 10px; text-align: center;">
             <h4 style="color: #2f3542; margin-bottom: 15px;">System Information</h4>
             <p style="color: #57606f; margin: 5px 0;">
-                <strong>Version:</strong> EMI Teaching Assistant v4.3.0 (Precise Modification Version)<br>
+                <strong>Version:</strong> EMI Teaching Assistant v4.3.1 (Syntax Error Fixed Version)<br>
                 <strong>Deployment Environment:</strong> Railway PostgreSQL + Flask<br>
                 <strong>Memory Function:</strong> [OK] Enabled - AI-generated topics, context memory supported<br>
-                <strong>Modification Content:</strong> [COMPLETE] Removed backup responses, simplified prompts, English registration<br>
+                <strong>Modification Content:</strong> [COMPLETE] Fixed syntax errors, removed duplicates, all features preserved<br>
                 <strong>Last Update:</strong> {current_time}
             </p>
         </div>
@@ -1569,11 +1565,6 @@ def index():
 </body>
 </html>
         """
-
-# =================== app.py 修改版 - 第3段-B結束 ===================
-
-# =================== app.py 修改版 - 第3段-C開始 ===================
-# 接續第3段-B，包含：修改版API端點(TSV格式)、匯出功能
 
 # =================== 修改版API端點(TSV格式)===================
 @app.route('/api/student/<int:student_id>/conversations')
@@ -1630,6 +1621,7 @@ def get_student_conversations(student_id):
         logger.error(f"[ERROR] 學生對話記錄 API 錯誤: {e}")
         return f"API error: {str(e)}", 500
 
+# =================== 系統統計 API ===================
 @app.route('/api/stats')
 def get_stats():
     """系統統計 API(修改版)"""
@@ -1668,6 +1660,7 @@ def get_stats():
             },
             "system": system_status,
             "modifications": {
+                "syntax_errors_fixed": True,
                 "backup_response_removed": True,
                 "ai_prompts_simplified": True,
                 "registration_english": True,
@@ -1681,118 +1674,12 @@ def get_stats():
         logger.error(f"[ERROR] 統計 API 錯誤: {e}")
         return jsonify({"error": f"Failed to load statistics: {str(e)}"}), 500
 
-# =================== 匯出功能(保留)===================
-@app.route('/students/export')
-def export_students():
-    """匯出學生清單為 TSV(保留功能)"""
-    try:
-        # 檢查資料庫是否就緒
-        if not DATABASE_INITIALIZED or not check_database_ready():
-            return "Database not ready, please try again later", 500
-        
-        # 查詢所有學生資料
-        students = Student.select().order_by(Student.created_at.desc())
-        
-        # 生成 TSV 內容
-        tsv_lines = []
-        tsv_lines.append("Student_ID\tName\tStudent_Number\tLINE_User_ID\tRegistration_Step\tMessage_Count\tCreated_Time\tLast_Active_Time")
-        
-        for student in students:
-            # 計算統計
-            msg_count = Message.select().where(Message.student == student).count()
-            
-            # 格式化時間
-            created_str = student.created_at.strftime('%Y-%m-%d %H:%M:%S') if student.created_at else "N/A"
-            last_active_str = student.last_activity.strftime('%Y-%m-%d %H:%M:%S') if student.last_activity else "N/A"
-            
-            # 註冊狀態
-            registration_status = "Completed" if student.registration_step == 0 else f"Step{student.registration_step}"
-            
-            # LINE ID 簡化顯示
-            line_id_short = student.line_user_id[-12:] if student.line_user_id else "N/A"
-            
-            tsv_lines.append(f"{student.id}\t{student.name or 'N/A'}\t{student.student_id or 'N/A'}\t{line_id_short}\t{registration_status}\t{msg_count}\t{created_str}\t{last_active_str}")
-        
-        tsv_content = '\n'.join(tsv_lines)
-        
-        # 設置檔案下載回應
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"emi_students_{timestamp}.tsv"
-        
-        response = make_response(tsv_content)
-        response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
-        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-        response.headers['Content-Length'] = len(tsv_content.encode('utf-8'))
-        
-        logger.info(f"[OK] 學生清單匯出成功: {filename}, 包含 {len(tsv_lines)-1} 筆學生記錄")
-        return response
-        
-    except Exception as e:
-        logger.error(f"[ERROR] 學生清單匯出失敗: {e}")
-        return f"Export failed: {str(e)}", 500
+# =================== 第3段結束標記 ===================
 
-@app.route('/export/tsv')
-def export_tsv():
-    """匯出完整對話資料為 TSV 格式(包含AI回應)"""
-    try:
-        # 檢查資料庫是否就緒
-        if not DATABASE_INITIALIZED or not check_database_ready():
-            return "Database not ready, please try again later", 500
-        
-        # 查詢所有對話資料
-        messages = Message.select(
-            Message.id,
-            Message.content,
-            Message.ai_response,
-            Message.timestamp,
-            Student.name,
-            Student.student_id,
-            Student.line_user_id
-        ).join(Student).order_by(Message.timestamp)
-        
-        # 生成 TSV 內容
-        tsv_lines = []
-        tsv_lines.append("Message_ID\tStudent_Name\tStudent_ID\tLINE_User_ID\tStudent_Message\tAI_Response\tTimestamp")
-        
-        for message in messages:
-            line_user_id_short = message.student.line_user_id[-8:] if message.student.line_user_id else "N/A"
-            timestamp_str = message.timestamp.strftime('%Y-%m-%d %H:%M:%S') if message.timestamp else "N/A"
-            
-            # 清理文字中的換行符和製表符
-            student_msg = (message.content or "").replace('\n', ' ').replace('\t', ' ')
-            ai_response = (message.ai_response or "").replace('\n', ' ').replace('\t', ' ')
-            student_name = (message.student.name or "Not Set").replace('\n', ' ').replace('\t', ' ')
-            student_id = (message.student.student_id or "Not Set").replace('\n', ' ').replace('\t', ' ')
-            
-            tsv_lines.append(f"{message.id}\t{student_name}\t{student_id}\t{line_user_id_short}\t{student_msg}\t{ai_response}\t{timestamp_str}")
-        
-        tsv_content = '\n'.join(tsv_lines)
-        
-        # 設置檔案下載回應
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"emi_complete_conversations_{timestamp}.tsv"
-        
-        response = make_response(tsv_content)
-        response.headers['Content-Type'] = 'text/tab-separated-values; charset=utf-8'
-        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-        response.headers['Content-Length'] = len(tsv_content.encode('utf-8'))
-        
-        logger.info(f"[OK] 完整對話資料匯出成功: {filename}, 包含 {len(tsv_lines)-1} 筆對話記錄")
-        return response
-        
-    except Exception as e:
-        logger.error(f"[ERROR] 完整對話資料匯出失敗: {e}")
-        return f"Export failed: {str(e)}", 500
+# =================== app.py 修改版 - 第4段-A開始 ===================
+# 接續第3段，包含：匯出功能、學生詳細頁面
 
-# =================== app.py 修改版 - 第3段-C結束 ===================
-
-# =================== app.py 修改版 - 第4段開始 ===================
-# 接續第3段，包含：其他API端點、健康檢查、錯誤處理
-
-# =================== 其他保留的API端點 ===================
-
-# 移除重複的函數 - 完全註解掉
-"""
+# =================== 匯出功能(單一定義版本)===================
 @app.route('/students/export')
 def export_students():
     """匯出學生清單為 TSV"""
@@ -1842,7 +1729,6 @@ def export_students():
         logger.error(f"[ERROR] 學生清單匯出失敗: {e}")
         return f"Export failed: {str(e)}", 500
 
-
 @app.route('/export/tsv')
 def export_tsv():
     """匯出完整對話資料為 TSV 格式(包含AI回應)"""
@@ -1895,58 +1781,6 @@ def export_tsv():
     except Exception as e:
         logger.error(f"[ERROR] 完整對話資料匯出失敗: {e}")
         return f"Export failed: {str(e)}", 500
-"""
-
-@app.route('/api/stats')
-def get_stats():
-    """系統統計 API"""
-    try:
-        # 檢查資料庫是否就緒
-        if not DATABASE_INITIALIZED or not check_database_ready():
-            return jsonify({"error": "Database not ready"}), 500
-        
-        # 基本統計
-        total_students = Student.select().count()
-        total_messages = Message.select().count()
-        
-        # 今日統計
-        today = datetime.date.today()
-        today_messages = Message.select().where(
-            Message.timestamp >= datetime.datetime.combine(today, datetime.time.min)
-        ).count()
-        
-        # 系統狀態
-        system_status = {
-            "database": "healthy" if DATABASE_INITIALIZED else "error",
-            "ai_service": "healthy" if model else "unavailable",
-            "line_bot": "healthy" if (line_bot_api and handler) else "unavailable",
-            "backup_models": len(backup_models),
-            "memory_function": "ai_generated_topics" if DATABASE_INITIALIZED else "disabled"
-        }
-        
-        return jsonify({
-            "students": {
-                "total": total_students,
-                "registered_today": 0  # 可以之後實作
-            },
-            "conversations": {
-                "total_messages": total_messages,
-                "today_messages": today_messages
-            },
-            "system": system_status,
-            "modifications": {
-                "backup_response_removed": True,
-                "ai_prompts_simplified": True,
-                "registration_english": True,
-                "session_management_removed": True,
-                "ai_generated_topics": True
-            },
-            "timestamp": datetime.datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logger.error(f"[ERROR] 統計 API 錯誤: {e}")
-        return jsonify({"error": f"Failed to load statistics: {str(e)}"}), 500
 
 # =================== 學生詳細頁面(簡化版)===================
 @app.route('/student/<int:student_id>')
@@ -2220,6 +2054,11 @@ def student_detail(student_id):
         </div>
         """
 
+# =================== 第4段-A結束標記 ===================
+
+# =================== app.py 修改版 - 第4段-B開始 ===================
+# 接續第4段-A，包含：健康檢查
+
 # =================== 修改版健康檢查 ===================
 @app.route('/health')
 def health_check():
@@ -2290,6 +2129,7 @@ def health_check():
                 }
             },
             "modifications": {
+                "syntax_errors_fixed": True,
                 "backup_response_removed": True,
                 "ai_prompts_simplified": True,
                 "registration_english": True,
@@ -2340,6 +2180,7 @@ def health_check():
         modifications_html = ""
         for mod_name, mod_status in health_data["modifications"].items():
             mod_display_name = {
+                "syntax_errors_fixed": "Syntax Errors Fixed",
                 "backup_response_removed": "Backup Response System Removed",
                 "ai_prompts_simplified": "AI Prompts Simplified",
                 "registration_english": "Registration Flow English",
@@ -2529,7 +2370,7 @@ def health_check():
     <div class="container">
         <div class="header">
             <h1>System Health Check</h1>
-            <p>EMI Teaching Assistant - Precise Modification Version Service Status Monitor</p>
+            <p>EMI Teaching Assistant - Syntax Error Fixed Version Service Status Monitor</p>
         </div>
         
         <div class="overall-status">
@@ -2539,7 +2380,7 @@ def health_check():
         
         <!-- 精確修改狀態 -->
         <div class="modifications-section">
-            <h3>✅ Precise Modifications Status</h3>
+            <h3>✅ Precise Modifications & Fixes Status</h3>
             {modifications_html}
         </div>
         
@@ -2560,7 +2401,7 @@ def health_check():
         
         <div class="timestamp">
             <p>Page will auto-refresh in 30 seconds</p>
-            <p>System Timezone: {os.environ.get('TZ', 'UTC')} | Precise Modification Version v4.3.0</p>
+            <p>System Timezone: {os.environ.get('TZ', 'UTC')} | Syntax Error Fixed Version v4.3.1</p>
         </div>
     </div>
 </body>
@@ -2592,7 +2433,7 @@ def health_check():
 </html>
         """, 500
 
-# =================== 第4段結束標記 ===================
+# =================== 第4段-B結束標記 ===================
 
 # =================== app.py 修改版 - 第5段開始 ===================
 # 接續第4段，包含：錯誤處理、啟動配置
@@ -2786,6 +2627,7 @@ if __name__ == '__main__':
         
         # 精確修改狀態確認
         logger.info("[MODIFICATION] 精確修改狀態確認:")
+        logger.info("  ✅ 修復語法錯誤：移除重複函數定義和孤立文檔字串")
         logger.info("  ✅ 移除備用回應系統：所有問題直接發送給 Gemini")
         logger.info("  ✅ 簡化 AI 提示詞：只加入 'Please answer in brief.'")
         logger.info("  ✅ 英文化註冊流程：所有註冊相關訊息改為英文")
@@ -2831,13 +2673,14 @@ except Exception as cleanup_error:
 
 # 輸出最終狀態
 logger.info("=" * 60)
-logger.info("EMI 智能教學助理系統 - 精確修改版 v4.3.0")
+logger.info("EMI 智能教學助理系統 - 語法錯誤修復版 v4.3.1")
 logger.info(f"[DATABASE] 資料庫: {'[OK] 就緒' if DATABASE_INITIALIZED else '[ERROR] 未就緒'}")
 logger.info(f"[AI] 主要AI: {'[OK] 就緒' if model else '[ERROR] 未配置'}")
 logger.info(f"[AI] 備用AI: {len(backup_models)} 個模型可用")
 logger.info(f"[LINE] LINE: {'[OK] 就緒' if (line_bot_api and handler) else '[ERROR] 未配置'}")
 logger.info(f"[MEMORY] 記憶功能: {'[OK] AI生成主題已啟用' if DATABASE_INITIALIZED else '[ERROR] 無法使用'}")
 logger.info("[MODIFICATION] 精確修改: [COMPLETED] 所有修改已完成")
+logger.info("  - 修復語法錯誤: ✅")
 logger.info("  - 移除備用回應系統: ✅")
 logger.info("  - 簡化AI提示詞: ✅") 
 logger.info("  - 英文化註冊流程: ✅")
@@ -2849,63 +2692,41 @@ logger.info("[READY] 系統準備就緒，等待請求...")
 logger.info("=" * 60)
 
 # =================== 檔案結束標記 ===================
-# app.py 精確修改版完成 - 這是最後一段(第5段)
+# app.py 語法錯誤修復版完成 - 這是最後一段(第5段)
 # 
-# 精確修改項目總結：
-# ✅ 1. 移除備用回應系統：
-#     - 刪除 get_fallback_response() 函數的複雜關鍵詞匹配
-#     - 所有問題直接發送給 Gemini 處理
-#     - 使用 handle_ai_failure() 處理 AI 失效情況
+# 主要修復項目：
+# ✅ 1. 修復語法錯誤：
+#     - 移除重複的函數定義 (export_students 和 export_tsv)
+#     - 刪除孤立的文檔字串 (第1798行的 """匯出學生清單為 TSV""")
+#     - 清理大量註釋掉的重複代碼塊
+#     - 確保所有函數都有正確的定義和結束
 # 
-# ✅ 2. 簡化 AI 提示詞：
-#     - 移除複雜的字數限制和格式要求(Maximum 150 words、NO greetings 等)
-#     - 只保留核心提示和 "Please answer in brief."
-#     - 增加 max_output_tokens 到 400
-# 
-# ✅ 3. 英文化註冊流程：
-#     - 所有註冊相關訊息改為英文
-#     - 歡迎訊息、步驟說明、確認訊息全部英文化
-#     - 保持相同的註冊邏輯流程
-# 
-# ✅ 4. 移除會話管理系統：
-#     - 移除 active_session 相關處理
-#     - 訊息直接記錄，session=None
-#     - 統計功能可透過分析所有對話記錄達成
-# 
-# ✅ 5. AI 失效處理機制：
-#     - 詳細記錄 AI 失效原因(錯誤類型、時間戳、模型資訊)
-#     - 實作備用 AI 模型機制(嘗試不同 Gemini 模型)
-#     - handle_ai_failure() 函數提供即時錯誤處理
-# 
-# ✅ 6. 新增匯出功能：
-#     - /students/export/conversations 路由
-#     - 匯出所有學生訊息(不含AI回應)，TSV格式
-#     - 隱私保護：LINE ID 只顯示後8位
-#     - 在學生管理頁面新增匯出按鈕
-# 
-# ✅ 7. API 端點 TSV 格式：
-#     - /api/student/{id}/conversations 輸出 TSV 格式
-#     - 自動下載檔案
-# 
-# ✅ 8. 保留所有現有功能：
-#     - 使用修改版 models.py 的優化記憶功能(AI生成主題)
-#     - Railway 部署配置
+# ✅ 2. 保留所有現有功能：
+#     - 所有 API 端點完整保留
+#     - 匯出功能正常運作
+#     - 學生管理功能完整
 #     - 健康檢查和錯誤處理
-#     - 學生管理和統計功能
+#     - AI 失效處理機制
+#     - 英文化註冊流程
+#     - 記憶功能和上下文保持
 # 
-# 檔案結構：
-# - 第1段：基本配置、AI初始化(備用模型機制)、AI失效處理(1-600行)
-# - 第2段：LINE Bot處理、移除會話管理、英文註冊、新增匯出功能(601-1200行)  
-# - 第3段：資料庫檢查、系統首頁(修改狀態顯示)、API端點TSV格式(1201-1800行)
-# - 第4段：其他API端點、學生詳細頁面、修改版健康檢查(1801-2400行)
-# - 第5段：錯誤處理、啟動配置(2401行-結束)
+# ✅ 3. 代碼結構優化：
+#     - 按功能模塊分段，每段不超過600行
+#     - 清晰的段落標記和註釋
+#     - 移除冗余代碼，保持核心功能
+#     - 統一的錯誤處理和日誌記錄
 # 
-# 總計修改內容：
-# - 完全按照精確修改策略執行
-# - 移除了不必要的備用回應和會話管理複雜性
-# - 簡化了 AI 交互流程，確保所有問題都由 AI 處理
-# - 實現了更強大的 AI 失效處理和備用機制
-# - 新增了實用的匯出功能，滿足數據分析需求
-# - 保持了所有記憶功能和核心教學助理功能
-# - 英文化提升了國際化程度
-# - 所有修改都經過仔細驗證，確保不影響現有功能
+# ✅ 4. 版本更新：
+#     - 版本號更新為 v4.3.1 (語法錯誤修復版)
+#     - 更新系統資訊和健康檢查頁面
+#     - 新增語法錯誤修復狀態顯示
+# 
+# 檔案分段結構：
+# - 第1段 (1-600行)：基本配置、AI初始化、失效處理機制
+# - 第2段 (601-1200行)：LINE Bot處理、訊息處理、學生管理頁面
+# - 第3段 (1201-1800行)：資料庫狀態、系統首頁、API端點
+# - 第4段 (1801-2400行)：匯出功能、學生詳細頁面、健康檢查
+# - 第5段 (2401行-結束)：錯誤處理、啟動配置
+# 
+# 修復後的系統現在應該可以正常部署和運行，
+# 所有原有功能都得到保留，語法錯誤已完全修復。
